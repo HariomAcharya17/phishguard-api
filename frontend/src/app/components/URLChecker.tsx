@@ -376,7 +376,7 @@ export default function URLChecker() {
             {/* Metrics grid */}
             <div style={{ padding: "20px 32px", borderBottom: "1px solid rgba(0,0,0,0.05)" }}>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
-                <MetricCell label="ML Score" value={`${(result.ml_score * 100).toFixed(1)}%`} accent="#4f46e5" />
+                <MetricCell label="ML Score" value={`${((result.ml_score ?? 0) * 100).toFixed(1)}%`} accent="#4f46e5" />
                 <MetricCell label="Risk Score" value={`${(result.risk_score * 100).toFixed(1)}%`} accent={cfg.color} />
                 <MetricCell
                   label="Domain Age"
@@ -386,7 +386,7 @@ export default function URLChecker() {
                 <MetricCell
                   label="Threats"
                   value={`${result.threats_detected?.length ?? 0} signals`}
-                  accent={result.threats_detected?.length > 0 ? "#ef4444" : "#10b981"}
+                  accent={(result.threats_detected?.length ?? 0) > 0 ? "#ef4444" : "#10b981"}
                 />
               </div>
             </div>

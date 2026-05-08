@@ -1,4 +1,4 @@
-from detectors import blacklist, pattern, domain, ml_model
+from . import blacklist, pattern, domain, ml_model
 import re
 from urllib.parse import urlparse
 

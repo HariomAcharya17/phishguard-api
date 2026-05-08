@@ -2,8 +2,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import os
+import sys
 
-# Load .env explicitly before anything else
+# Add the current directory to sys.path so that 'routes' and 'detectors' can be imported
+sys.path.append(os.path.dirname(__file__))
+
+# Load .env explicitly (will be ignored on Vercel, which is fine)
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 from routes import check, auth, analytics

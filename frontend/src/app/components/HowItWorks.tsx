@@ -65,7 +65,7 @@ export default function HowItWorks() {
         initial={{ opacity: 0, y: 24 }}
         whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true, margin: "-60px" }}
-        transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
+        transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] as any }}
         style={{ textAlign: "center", marginBottom: 60 }}
       >
         <div className="mono" style={{ fontSize: "0.65rem", letterSpacing: "0.25em", textTransform: "uppercase", color: "#4f46e5", marginBottom: 16 }}>
@@ -107,7 +107,7 @@ export default function HowItWorks() {
             initial={{ opacity: 0, x: i % 2 === 0 ? -20 : 20 }}
             whileInView={{ opacity: 1, x: 0 }}
             viewport={{ once: true, margin: "-40px" }}
-            transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] as any }}
           >
             <motion.div
               whileHover={{ scale: 1.012, boxShadow: `0 8px 36px rgba(0,0,0,0.09), 0 0 0 1.5px ${layer.color}22` }}

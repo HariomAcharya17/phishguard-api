@@ -67,7 +67,7 @@ function AnalysisLayer({ label, score, color, delay = 0, icon, desc }: {
           <motion.div
             initial={{ width: 0 }}
             animate={{ width: `${score * 100}%` }}
-            transition={{ duration: 1.2, delay: delay + 0.2, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: 1.2, delay: delay + 0.2, ease: [0.22, 1, 0.36, 1] as any }}
             style={{
               height: "100%", background: color,
               boxShadow: score > 0.3 ? `0 0 12px ${color}40` : "none",
@@ -96,7 +96,7 @@ function RiskMeter({ score, color }: { score: number; color: string }) {
           strokeDasharray={`${circ}`}
           initial={{ strokeDashoffset: circ }}
           animate={{ strokeDashoffset: circ - (circ * pct / 100) }}
-          transition={{ duration: 1.2, ease: [0.22, 1, 0.36, 1] }}
+          transition={{ duration: 1.2, ease: [0.22, 1, 0.36, 1] as any }}
           style={{ transform: "rotate(-90deg)", transformOrigin: "60px 60px", filter: `drop-shadow(0 0 6px ${color}60)` }}
         />
       </svg>
@@ -184,7 +184,7 @@ export default function URLChecker() {
         initial={{ opacity: 0, y: 24 }}
         whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true }}
-        transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
+        transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] as any }}
         style={{ textAlign: "center", marginBottom: 44 }}
       >
         <div className="mono" style={{ fontSize: "0.65rem", letterSpacing: "0.25em", textTransform: "uppercase", color: "#4f46e5", marginBottom: 16 }}>
@@ -323,7 +323,7 @@ export default function URLChecker() {
           <motion.div
             initial={{ opacity: 0, y: 24 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] as any }}
             style={{
               marginTop: 24,
               background: "#ffffff",

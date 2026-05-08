@@ -48,7 +48,7 @@ export default function BuildStory() {
         initial={{ opacity: 0, y: 24 }}
         whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true, margin: "-60px" }}
-        transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
+        transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] as any }}
         style={{ textAlign: "center", marginBottom: 64 }}
       >
         <div className="mono" style={{ fontSize: "0.65rem", letterSpacing: "0.25em", textTransform: "uppercase", color: "#4f46e5", marginBottom: 16 }}>
@@ -67,7 +67,7 @@ export default function BuildStory() {
             initial={{ opacity: 0, x: -16 }}
             whileInView={{ opacity: 1, x: 0 }}
             viewport={{ once: true, margin: "-40px" }}
-            transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1], delay: i * 0.04 }}
+            transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] as any, delay: i * 0.04 }}
             style={{ display: "grid", gridTemplateColumns: "48px 1fr", gap: "0 18px" }}
           >
             {/* Spine */}

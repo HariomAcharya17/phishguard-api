@@ -3,6 +3,7 @@ import pandas as pd
 import re
 from math import log2
 import os
+import gzip
 
 
 # =====================================================
@@ -11,7 +12,7 @@ import os
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 
-with open(os.path.join(BASE_DIR, 'phishing_model.pkl'), 'rb') as f:
+with gzip.open(os.path.join(BASE_DIR, 'phishing_model.pkl.gz'), 'rb') as f:
     model = pickle.load(f)
 
 

@@ -632,6 +632,7 @@ function SplashCursor({
     const displayMaterial = new Material(baseVertexShader, displayShaderSource);
 
     function initFramebuffers() {
+      if (!ext) return;
       const simRes = getResolution(config.SIM_RESOLUTION);
       const dyeRes = getResolution(config.DYE_RESOLUTION);
       const texType = ext.halfFloatTexType;
@@ -835,7 +836,7 @@ function SplashCursor({
 
       advectionProgram.bind();
       gl.uniform2f(advectionProgram.uniforms.texelSize, velocity.texelSizeX, velocity.texelSizeY);
-      if (!ext.supportLinearFiltering)
+      if (!ext?.supportLinearFiltering)
         gl.uniform2f(advectionProgram.uniforms.dyeTexelSize, velocity.texelSizeX, velocity.texelSizeY);
       const velocityId = velocity.read.attach(0);
       gl.uniform1i(advectionProgram.uniforms.uVelocity, velocityId);
@@ -845,7 +846,7 @@ function SplashCursor({
       blit(velocity.write);
       velocity.swap();
 
-      if (!ext.supportLinearFiltering)
+      if (!ext?.supportLinearFiltering)
         gl.uniform2f(advectionProgram.uniforms.dyeTexelSize, dye.texelSizeX, dye.texelSizeY);
       gl.uniform1i(advectionProgram.uniforms.uVelocity, velocity.read.attach(0));
       gl.uniform1i(advectionProgram.uniforms.uSource, dye.read.attach(1));

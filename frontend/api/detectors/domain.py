@@ -22,20 +22,22 @@ def analyze(url: str) -> dict:
 
     try:
         response = requests.get(
-            "https://www.whoisxmlapi.com/whoisserver/WhoisService",
+            "https://api.ip2whois.com/v2",
             params={
-                "apiKey": WHOIS_API_KEY,
-                "domainName": domain,
-                "outputFormat": "JSON"
+                "key": WHOIS_API_KEY,
+                "domain": domain,
+                "format": "json"
             },
             timeout=5
         )
 
         data = response.json()
-        created_at = data.get("WhoisRecord", {}).get("createdDate", None)
+        # IP2WHOIS uses 'create_date' directly in the root of the JSON
+        created_at = data.get("create_date", None)
 
         if created_at:
             try:
+                # IP2WHOIS usually returns YYYY-MM-DD
                 created_date = datetime.strptime(created_at[:10], "%Y-%m-%d")
                 domain_age_days = (datetime.now() - created_date).days
 
@@ -46,11 +48,9 @@ def analyze(url: str) -> dict:
                     threats.append("young_domain")
                     score += 0.2
             except:
-                # FIX: date parse failed = treat as unknown age, not zero
                 threats.append("unknown_domain_age")
                 score += 0.2
         else:
-            # FIX: no creation date in WHOIS record = suspicious
             threats.append("no_creation_date")
             score += 0.2
 

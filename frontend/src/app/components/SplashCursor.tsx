@@ -763,6 +763,7 @@ function SplashCursor({
     }
 
     function resizeCanvas() {
+      if (!canvas) return false;
       const width = scaleByPixelRatio(canvas.clientWidth);
       const height = scaleByPixelRatio(canvas.clientHeight);
       if (canvas.width !== width || canvas.height !== height) {
@@ -896,6 +897,7 @@ function SplashCursor({
       dx: number, dy: number,
       color: { r: number; g: number; b: number }
     ) {
+      if (!canvas) return;
       splatProgram.bind();
       gl.uniform1i(splatProgram.uniforms.uTarget, velocity.read.attach(0));
       gl.uniform1f(splatProgram.uniforms.aspectRatio, canvas.width / canvas.height);
@@ -912,6 +914,7 @@ function SplashCursor({
     }
 
     function correctRadius(radius: number) {
+      if (!canvas) return radius;
       const aspectRatio = canvas.width / canvas.height;
       if (aspectRatio > 1) radius *= aspectRatio;
       return radius;
@@ -920,6 +923,7 @@ function SplashCursor({
     // ─── Pointer helpers ──────────────────────────────────────────────────────
 
     function updatePointerDownData(pointer: Pointer, id: number, posX: number, posY: number) {
+      if (!canvas) return;
       pointer.id = id;
       pointer.down = true;
       pointer.moved = false;
@@ -936,6 +940,7 @@ function SplashCursor({
       pointer: Pointer, posX: number, posY: number,
       color: { r: number; g: number; b: number }
     ) {
+      if (!canvas) return;
       pointer.prevTexcoordX = pointer.texcoordX;
       pointer.prevTexcoordY = pointer.texcoordY;
       pointer.texcoordX = posX / canvas.width;
@@ -951,12 +956,14 @@ function SplashCursor({
     }
 
     function correctDeltaX(delta: number) {
+      if (!canvas) return delta;
       const aspectRatio = canvas.width / canvas.height;
       if (aspectRatio < 1) delta *= aspectRatio;
       return delta;
     }
 
     function correctDeltaY(delta: number) {
+      if (!canvas) return delta;
       const aspectRatio = canvas.width / canvas.height;
       if (aspectRatio > 1) delta /= aspectRatio;
       return delta;

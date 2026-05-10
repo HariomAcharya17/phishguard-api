@@ -47,19 +47,35 @@ def _is_typo(hostname: str, brand: str) -> bool:
     # If normalized versions match but originals don't, it's a repetition typo (e.g., payytm vs paytm)
     if norm_brand in norm_host and brand not in hostname:
         return True
+    
+    # Check for character substitution or missing characters if they are very similar length
+    if abs(len(hostname) - len(brand)) <= 2:
+        # Simple distance check for common brands
+        from difflib import SequenceMatcher
+        ratio = SequenceMatcher(None, hostname, brand).ratio()
+        if ratio > 0.8 and ratio < 1.0:
+            return True
+
     return False
 
 def _brand_in_domain(hostname: str, brands: list) -> bool:
     """Check brands against hostname only, skip if it's the legitimate domain."""
     hostname = hostname.replace("www.", "").lower()
+    # Extract the main domain part (e.g., 'payypal' from 'payypal.com' or 'payypal.co.uk')
+    parts = hostname.split('.')
+    if not parts:
+        return False
+    domain_part = parts[0]
+    
     for brand in brands:
-        # Check for direct inclusion
-        if brand in hostname:
-            if f"{brand}.com" not in hostname:
-                return True
-        # Check for typosquatting (e.g., payytm)
-        if _is_typo(hostname, brand):
+        # Check for typosquatting on the main domain part (e.g., payytm)
+        if _is_typo(domain_part, brand):
             return True
+        # Check for direct inclusion in the full hostname if it's not the legitimate domain
+        if brand in hostname:
+            # If it's something like paypal-security.com or login-paypal.com
+            if not hostname.startswith(f"{brand}."):
+                return True
     return False
 
 
@@ -69,7 +85,7 @@ def analyze(url: str) -> dict:
 
     try:
         parsed = urlparse(url)
-        hostname = parsed.hostname or ""
+        hostname = (parsed.hostname or "").lower()
     except Exception:
         hostname = url.lower()
 
@@ -77,16 +93,13 @@ def analyze(url: str) -> dict:
 
     # Layer 1 — Blacklist
     blacklist_result = blacklist.analyze(url)
-    all_threats.extend(blacklist_result["threats"])
-
+    
     # Layer 2 — Pattern Analysis
     pattern_result = pattern.analyze(url)
-    all_threats.extend(pattern_result["threats"])
-
+    
     # Layer 3 — Domain Intelligence
     domain_result = domain.analyze(url)
-    all_threats.extend(domain_result["threats"])
-
+    
     # Layer 4 — ML Detection
     ml_result = ml_model.predict(url)
 
@@ -106,7 +119,6 @@ def analyze(url: str) -> dict:
         ".tk", ".ml", ".ga", ".cf", ".gq",
         ".xyz", ".top", ".click", ".work",
         ".loan", ".online", ".site", ".live", ".icu"
-        # removed ".support" — conflicts with danger_keywords
     ]
     if any(hostname.endswith(tld) for tld in suspicious_tlds):
         final_score += 0.25
@@ -119,17 +131,16 @@ def analyze(url: str) -> dict:
         "paytm", "binance", "coinbase", "kraken",
         "dropbox", "chase", "wellsfargo", "citibank"
     ]
-    # FIX: now actually calling _brand_in_domain instead of url_lower check
+    
     if _brand_in_domain(hostname, brands):
-        final_score += 0.20
-        all_threats.append("Brand Impersonation")
+        final_score += 0.35 # Increased from 0.20
+        all_threats.append("Brand Impersonation / Typosquatting")
 
     danger_keywords = [
         "login", "verify", "secure", "update", "password",
         "signin", "confirm", "billing", "session", "account",
         "banking", "alert", "credential", "auth",
         "validation", "reset", "recover"
-        # removed "support" and "help" — too many false positives
     ]
     keyword_matches = sum(kw in url_lower for kw in danger_keywords)
 
@@ -146,7 +157,7 @@ def analyze(url: str) -> dict:
         all_threats.append("Excessive Hyphens")
 
     if re.search(r'\d+\.\d+\.\d+\.\d+', url):
-        final_score += 0.20
+        final_score += 0.25
         all_threats.append("IP Address URL")
 
     if len(url) > 100:
@@ -156,10 +167,10 @@ def analyze(url: str) -> dict:
     domain_age = domain_result.get("domain_age_days")
     if domain_age is not None:
         if domain_age < 30:
-            final_score += 0.20
+            final_score += 0.25
             all_threats.append("Newly Registered Domain")
         elif domain_age < 90:
-            final_score += 0.10
+            final_score += 0.15
             all_threats.append("Recently Registered Domain")
     else:
         final_score += 0.15
@@ -174,6 +185,12 @@ def analyze(url: str) -> dict:
 
     is_safe = final_score < 0.25
 
+    # Aggregate threats from all layers
+    all_threats.extend(blacklist_result["threats"])
+    all_threats.extend(pattern_result["threats"])
+    all_threats.extend(domain_result["threats"])
+    
+    # Return detailed breakdown
     return {
         "url": url,
         "is_safe": is_safe,
@@ -184,9 +201,25 @@ def analyze(url: str) -> dict:
         "domain_age_days": domain_result["domain_age_days"],
         "recommendation": get_recommendation(final_score),
         "breakdown": {
-            "blacklist_score": blacklist_result["blacklist_score"],
-            "pattern_score": pattern_result["pattern_score"],
-            "domain_score": domain_result["domain_score"],
-            "ml_score": ml_result["ml_score"]
+            "blacklist": {
+                "score": blacklist_result["blacklist_score"],
+                "threats": blacklist_result["threats"],
+                "description": "Cross-references global databases for known malicious signatures."
+            },
+            "pattern": {
+                "score": pattern_result["pattern_score"],
+                "threats": pattern_result["threats"],
+                "description": "Examines URL structure and character distribution for obfuscation."
+            },
+            "domain": {
+                "score": domain_result["domain_score"],
+                "threats": domain_result["threats"],
+                "description": "Evaluates domain age, SSL status, and historical reputation."
+            },
+            "ml": {
+                "score": ml_result["ml_score"],
+                "threats": ["Deep learning inference complete"],
+                "description": "Neural classifier trained on millions of samples for zero-day detection."
+            }
         }
     }

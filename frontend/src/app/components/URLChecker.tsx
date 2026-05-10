@@ -401,32 +401,38 @@ export default function URLChecker() {
                   <AnalysisLayer 
                     icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>} 
                     label="Threat Registry" 
-                    desc="Cross-references global databases for known malicious signatures and reports."
-                    score={result.breakdown.blacklist_score} 
+                    desc={result.breakdown.blacklist.threats.length > 0 
+                      ? `Found: ${result.breakdown.blacklist.threats.join(", ")}` 
+                      : result.breakdown.blacklist.description}
+                    score={result.breakdown.blacklist.score} 
                     color="#ef4444" 
                     delay={0} 
                   />
                   <AnalysisLayer 
                     icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>} 
                     label="Heuristic Analysis" 
-                    desc="Examines URL structure and character distribution for obfuscation patterns."
-                    score={result.breakdown.pattern_score} 
+                    desc={result.breakdown.pattern.threats.length > 0 
+                      ? `Found: ${result.breakdown.pattern.threats.join(", ")}` 
+                      : result.breakdown.pattern.description}
+                    score={result.breakdown.pattern.score} 
                     color="#f59e0b" 
                     delay={0.1} 
                   />
                   <AnalysisLayer 
                     icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>} 
                     label="Entity Reputation" 
-                    desc="Evaluates domain age, SSL status, and historical registrar reliability."
-                    score={result.breakdown.domain_score} 
+                    desc={result.breakdown.domain.threats.length > 0 
+                      ? `Found: ${result.breakdown.domain.threats.join(", ")}` 
+                      : result.breakdown.domain.description}
+                    score={result.breakdown.domain.score} 
                     color="#f97316" 
                     delay={0.2} 
                   />
                   <AnalysisLayer 
                     icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"/><path d="M12 6a6 6 0 1 0 6 6 6 6 0 0 0-6-6zm0 10a4 4 0 1 1 4-4 4 4 0 0 1-4 4z"/></svg>} 
                     label="Neural Intelligence" 
-                    desc="Deep-learning classifier trained on millions of samples for zero-day detection."
-                    score={result.breakdown.ml_score} 
+                    desc={result.breakdown.ml.description}
+                    score={result.breakdown.ml.score} 
                     color="#4f46e5" 
                     delay={0.3} 
                   />

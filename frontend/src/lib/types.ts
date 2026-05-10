@@ -8,10 +8,10 @@ export interface CheckResult {
   threats_detected: string[];
   recommendation: string;
   breakdown: {
-    blacklist_score: number;
-    pattern_score: number;
-    domain_score: number;
-    ml_score: number;
+    blacklist: { score: number; threats: string[]; description: string };
+    pattern: { score: number; threats: string[]; description: string };
+    domain: { score: number; threats: string[]; description: string };
+    ml: { score: number; threats: string[]; description: string };
   };
   domain_age_days?: number;
   ml_confidence?: number;

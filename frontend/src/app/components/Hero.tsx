@@ -147,7 +147,7 @@ export default function Hero() {
           {[
             { val: "86.72%", label: "ML Accuracy", color: "#4f46e5" },
             { val: "4", label: "Detection Layers", color: "#f97316" },
-            { val: "< 1s", label: "Response Time", color: "#10b981" },
+            { val: "Live", label: "Threat Analysis", color: "#10b981" },
           ].map((s) => (
             <motion.div
               key={s.label}

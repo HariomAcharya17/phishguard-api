@@ -398,7 +398,7 @@ export default function URLChecker() {
                 <MetricCell label="Risk Score" value={fmtPct(result.risk_score)} accent={cfg.color} />
                 <MetricCell
                   label="Domain Age"
-                  value={result.domain_age_days != null && result.domain_age_days !== 9999
+                  value={result.domain_age_days != null
                     ? `${result.domain_age_days}d`
                     : "Unknown"}
                   accent={

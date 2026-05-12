@@ -46,13 +46,7 @@ def analyze(url: str) -> dict:
 
     root_domain = _get_root_domain(url)
 
-    # Fast-path for trusted domains
-    if root_domain in TRUSTED_DOMAINS:
-        return {
-            "threats": [],
-            "domain_score": 0.0,
-            "domain_age_days": 9999  # Signal to scorer: established domain
-        }
+
 
     # WHOIS lookup
     try:

@@ -189,15 +189,7 @@ def predict(url: str) -> dict:
     root_domain = _get_root_domain(url)
     is_trusted = root_domain in TRUSTED_DOMAINS
 
-    # Fast-path: trusted domains return a near-zero ML score
-    # The model was likely trained without these well-known domains
-    # so its output for them is unreliable — override it.
-    if is_trusted:
-        return {
-            "ml_score": 0.05,
-            "is_phishing": False,
-            "features": extract_features(url)
-        }
+
 
     # Model not loaded — return neutral 0.0, not 0.5
     # scorer will rely more on other layers

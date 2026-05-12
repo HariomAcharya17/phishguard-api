@@ -30,13 +30,7 @@ def analyze(url: str) -> dict:
     threats = []
     score = 0.0
 
-    # Fast-path: skip VT entirely for well-known trusted domains
-    root_domain = _get_root_domain(url)
-    if root_domain in TRUSTED_DOMAINS:
-        return {
-            "threats": [],
-            "blacklist_score": 0.0
-        }
+
 
     if not VIRUSTOTAL_API_KEY:
         return {

@@ -82,8 +82,9 @@ def _check_brand_on_foreign_domain(url_lower: str, root_domain: str) -> bool:
     """
     for brand in BRAND_NAMES:
         if brand in url_lower:
-            # If root domain IS the brand's legitimate domain, skip
-            if root_domain.startswith(brand + "."):
+            # If root domain IS the brand's legitimate domain (exactly), skip
+            # e.g. root_domain is 'paypal.com' or 'google.com'
+            if root_domain == brand + ".com" or root_domain == brand + ".org" or root_domain == brand + ".net":
                 continue
             return True
     return False

@@ -210,7 +210,7 @@ export default function URLChecker() {
           Analyze Any URL
         </h2>
         <p style={{ color: "rgba(15,14,23,0.45)", marginTop: 12, fontSize: "0.9rem", fontFamily: "'Inter', sans-serif" }}>
-          Multi-layer threat detection in under a second.
+          Advanced threat analysis powered by a multi-layered security pipeline.
         </p>
       </motion.div>
 

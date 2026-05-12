@@ -86,8 +86,12 @@ def analyze(url: str) -> dict:
             trusted_name = trusted.split('.')[0]
             trusted_full = trusted.lower()
             
-            # Direct brand in domain (e.g., login-paypal.com)
-            if trusted_name in domain and trusted_full not in domain:
+            # Exact match — skip
+            if domain == trusted_full or domain.endswith("." + trusted_full):
+                continue
+
+            # Brand name in domain (e.g., login-paypal.com or facebook.comn)
+            if trusted_name in domain:
                 threats.append(f"brand_impersonation_{trusted_name}")
                 score += 0.4
                 break

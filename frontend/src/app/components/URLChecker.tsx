@@ -15,8 +15,10 @@ const PHASES = [
 function AnalysisLayer({ label, score, color, delay = 0, icon, desc }: {
   label: string; score: number; color: string; delay?: number; icon: React.ReactNode; desc: string;
 }) {
-  const status = score > 0.7 ? "CRITICAL" : score > 0.3 ? "SUSPICIOUS" : "CLEAN";
-  const statusColor = score > 0.7 ? "#ef4444" : score > 0.3 ? "#f59e0b" : "#10b981";
+  // FIX: guard against NaN/undefined score
+  const safeScore = typeof score === "number" && !isNaN(score) ? score : 0;
+  const status = safeScore > 0.7 ? "CRITICAL" : safeScore > 0.3 ? "SUSPICIOUS" : "CLEAN";
+  const statusColor = safeScore > 0.7 ? "#ef4444" : safeScore > 0.3 ? "#f59e0b" : "#10b981";
 
   return (
     <motion.div
@@ -35,8 +37,8 @@ function AnalysisLayer({ label, score, color, delay = 0, icon, desc }: {
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div style={{ display: "flex", gap: 12 }}>
-          <div style={{ 
-            width: 36, height: 36, borderRadius: 10, 
+          <div style={{
+            width: 36, height: 36, borderRadius: 10,
             background: `${color}10`, color: color,
             display: "flex", alignItems: "center", justifyContent: "center"
           }}>
@@ -66,16 +68,16 @@ function AnalysisLayer({ label, score, color, delay = 0, icon, desc }: {
         <div style={{ flex: 1, height: 5, background: "rgba(0,0,0,0.06)", borderRadius: 99, overflow: "hidden" }}>
           <motion.div
             initial={{ width: 0 }}
-            animate={{ width: `${score * 100}%` }}
+            animate={{ width: `${safeScore * 100}%` }}
             transition={{ duration: 1.2, delay: delay + 0.2, ease: [0.22, 1, 0.36, 1] as any }}
             style={{
               height: "100%", background: color,
-              boxShadow: score > 0.3 ? `0 0 12px ${color}40` : "none",
+              boxShadow: safeScore > 0.3 ? `0 0 12px ${color}40` : "none",
             }}
           />
         </div>
         <span className="mono" style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--text)", minWidth: "30px", textAlign: "right" }}>
-          {(score * 100).toFixed(0)}%
+          {(safeScore * 100).toFixed(0)}%
         </span>
       </div>
     </motion.div>
@@ -83,7 +85,9 @@ function AnalysisLayer({ label, score, color, delay = 0, icon, desc }: {
 }
 
 function RiskMeter({ score, color }: { score: number; color: string }) {
-  const pct = score * 100;
+  // FIX: guard against NaN/undefined — default to 0
+  const safeScore = typeof score === "number" && !isNaN(score) ? score : 0;
+  const pct = safeScore * 100;
   const r = 52;
   const circ = 2 * Math.PI * r;
   return (
@@ -130,6 +134,12 @@ function MetricCell({ label, value, accent }: { label: string; value: string; ac
   );
 }
 
+// FIX: safe percentage formatter — never returns NaN%
+function fmtPct(val: number | null | undefined, decimals = 1): string {
+  if (val == null || isNaN(val)) return "0.0%";
+  return `${(val * 100).toFixed(decimals)}%`;
+}
+
 export default function URLChecker() {
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
@@ -166,6 +176,12 @@ export default function URLChecker() {
         throw new Error(err?.error || `Server responded with ${res.status}`);
       }
       const data: CheckResult = await res.json();
+
+      // FIX: normalise score fields so downstream components never see undefined
+      data.risk_score = typeof data.risk_score === "number" ? data.risk_score : 0;
+      data.ml_score = typeof data.ml_score === "number" ? data.ml_score : 0;
+      data.threats_detected = Array.isArray(data.threats_detected) ? data.threats_detected : [];
+
       setResult(data);
     } catch (e: unknown) {
       clearInterval(intervalRef.current!);
@@ -217,7 +233,7 @@ export default function URLChecker() {
         }}
       >
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0, opacity: 0.3 }}>
-          <path d="M6.5 2a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9ZM1 6.5a5.5 5.5 0 1 1 9.9 3.293l3.154 3.153a.5.5 0 0 1-.707.708L10.19 10.5A5.5 5.5 0 0 1 1 6.5Z" fill="currentColor"/>
+          <path d="M6.5 2a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9ZM1 6.5a5.5 5.5 0 1 1 9.9 3.293l3.154 3.153a.5.5 0 0 1-.707.708L10.19 10.5A5.5 5.5 0 0 1 1 6.5Z" fill="currentColor" />
         </svg>
         <input
           type="text"
@@ -266,11 +282,11 @@ export default function URLChecker() {
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
-            style={{ 
-              marginTop: 24, 
-              padding: "20px", 
-              borderRadius: 16, 
-              background: "rgba(79,70,229,0.03)", 
+            style={{
+              marginTop: 24,
+              padding: "20px",
+              borderRadius: 16,
+              background: "rgba(79,70,229,0.03)",
               border: "1px solid rgba(79,70,229,0.1)",
               display: "flex",
               flexDirection: "column",
@@ -286,7 +302,7 @@ export default function URLChecker() {
               </span>
             </div>
             <div style={{ height: 4, background: "rgba(0,0,0,0.05)", borderRadius: 99, overflow: "hidden" }}>
-              <motion.div 
+              <motion.div
                 animate={{ width: `${((phaseIdx + 1) / PHASES.length) * 100}%` }}
                 transition={{ duration: 0.8, ease: "circOut" }}
                 style={{ height: "100%", background: "#4f46e5", boxShadow: "0 0 10px rgba(79,70,229,0.3)" }}
@@ -360,6 +376,7 @@ export default function URLChecker() {
                   {result.recommendation}
                 </div>
               </div>
+              {/* FIX: pass guaranteed-number to RiskMeter */}
               <RiskMeter score={result.risk_score} color={cfg.color} />
             </div>
 
@@ -376,12 +393,21 @@ export default function URLChecker() {
             {/* Metrics grid */}
             <div style={{ padding: "20px 32px", borderBottom: "1px solid rgba(0,0,0,0.05)" }}>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
-                <MetricCell label="ML Score" value={`${((result.ml_score ?? 0) * 100).toFixed(1)}%`} accent="#4f46e5" />
-                <MetricCell label="Risk Score" value={`${(result.risk_score * 100).toFixed(1)}%`} accent={cfg.color} />
+                {/* FIX: use fmtPct() helper — never shows NaN% */}
+                <MetricCell label="ML Score" value={fmtPct(result.ml_score)} accent="#4f46e5" />
+                <MetricCell label="Risk Score" value={fmtPct(result.risk_score)} accent={cfg.color} />
                 <MetricCell
                   label="Domain Age"
-                  value={result.domain_age_days != null ? `${result.domain_age_days}d` : "Unknown"}
-                  accent={result.domain_age_days != null && result.domain_age_days < 90 ? "#f97316" : "rgba(15,14,23,0.6)"}
+                  value={result.domain_age_days != null && result.domain_age_days !== 9999
+                    ? `${result.domain_age_days}d`
+                    : "Unknown"}
+                  accent={
+                    result.domain_age_days != null &&
+                      result.domain_age_days !== 9999 &&
+                      result.domain_age_days < 90
+                      ? "#f97316"
+                      : "rgba(15,14,23,0.6)"
+                  }
                 />
                 <MetricCell
                   label="Threats"
@@ -395,46 +421,46 @@ export default function URLChecker() {
             {result.breakdown && (
               <div style={{ padding: "24px 32px", borderBottom: "1px solid rgba(0,0,0,0.05)" }}>
                 <div style={{ fontSize: "0.6rem", color: "rgba(15,14,23,0.28)", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 18, fontFamily: "'Inter', sans-serif" }}>
-                   Detection Breakdown
+                  Detection Breakdown
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 16 }}>
-                  <AnalysisLayer 
-                    icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>} 
-                    label="Threat Registry" 
-                    desc={result.breakdown.blacklist.threats.length > 0 
-                      ? `Found: ${result.breakdown.blacklist.threats.join(", ")}` 
+                  <AnalysisLayer
+                    icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>}
+                    label="Threat Registry"
+                    desc={result.breakdown.blacklist.threats.length > 0
+                      ? `Found: ${result.breakdown.blacklist.threats.join(", ")}`
                       : result.breakdown.blacklist.description}
-                    score={result.breakdown.blacklist.score} 
-                    color="#ef4444" 
-                    delay={0} 
+                    score={result.breakdown.blacklist.score}
+                    color="#ef4444"
+                    delay={0}
                   />
-                  <AnalysisLayer 
-                    icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>} 
-                    label="Heuristic Analysis" 
-                    desc={result.breakdown.pattern.threats.length > 0 
-                      ? `Found: ${result.breakdown.pattern.threats.join(", ")}` 
+                  <AnalysisLayer
+                    icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" /></svg>}
+                    label="Heuristic Analysis"
+                    desc={result.breakdown.pattern.threats.length > 0
+                      ? `Found: ${result.breakdown.pattern.threats.join(", ")}`
                       : result.breakdown.pattern.description}
-                    score={result.breakdown.pattern.score} 
-                    color="#f59e0b" 
-                    delay={0.1} 
+                    score={result.breakdown.pattern.score}
+                    color="#f59e0b"
+                    delay={0.1}
                   />
-                  <AnalysisLayer 
-                    icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>} 
-                    label="Entity Reputation" 
-                    desc={result.breakdown.domain.threats.length > 0 
-                      ? `Found: ${result.breakdown.domain.threats.join(", ")}` 
+                  <AnalysisLayer
+                    icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="2" y1="12" x2="22" y2="12" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" /></svg>}
+                    label="Entity Reputation"
+                    desc={result.breakdown.domain.threats.length > 0
+                      ? `Found: ${result.breakdown.domain.threats.join(", ")}`
                       : result.breakdown.domain.description}
-                    score={result.breakdown.domain.score} 
-                    color="#f97316" 
-                    delay={0.2} 
+                    score={result.breakdown.domain.score}
+                    color="#f97316"
+                    delay={0.2}
                   />
-                  <AnalysisLayer 
-                    icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"/><path d="M12 6a6 6 0 1 0 6 6 6 6 0 0 0-6-6zm0 10a4 4 0 1 1 4-4 4 4 0 0 1-4 4z"/></svg>} 
-                    label="Neural Intelligence" 
+                  <AnalysisLayer
+                    icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z" /><path d="M12 6a6 6 0 1 0 6 6 6 6 0 0 0-6-6zm0 10a4 4 0 1 1 4-4 4 4 0 0 1-4 4z" /></svg>}
+                    label="Neural Intelligence"
                     desc={result.breakdown.ml.description}
-                    score={result.breakdown.ml.score} 
-                    color="#4f46e5" 
-                    delay={0.3} 
+                    score={result.breakdown.ml.score}
+                    color="#4f46e5"
+                    delay={0.3}
                   />
                 </div>
               </div>

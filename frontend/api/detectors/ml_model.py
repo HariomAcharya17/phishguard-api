@@ -7,7 +7,7 @@ import gzip
 from urllib.parse import urlparse
 
 # =====================================================
-# LOAD MODEL
+# LOAD MODEL & ENCODER
 # =====================================================
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
@@ -20,6 +20,36 @@ except Exception as e:
     model = None
     MODEL_LOADED = False
     print(f"[ml_model] WARNING: Could not load model: {e}")
+
+try:
+    with open(os.path.join(BASE_DIR, 'label_encoder.pkl'), 'rb') as f:
+        encoder = pickle.load(f)
+    ENCODER_LOADED = True
+except Exception as e:
+    encoder = None
+    ENCODER_LOADED = False
+    print(f"[ml_model] WARNING: Could not load encoder: {e}")
+
+# The exact 17 features in correct order expected by the trained ML model
+EXPECTED_FEATURES = [
+    'url_length',
+    'num_dots',
+    'num_hyphens',
+    'num_slashes',
+    'num_at',
+    'num_question',
+    'num_equal',
+    'num_underscore',
+    'num_percent',
+    'has_ip',
+    'has_https',
+    'entropy',
+    'has_suspicious_keyword',
+    'domain_length',
+    'num_subdomains',
+    'num_digits',
+    'num_special'
+]
 
 
 # =====================================================
@@ -202,20 +232,31 @@ def predict(url: str) -> dict:
 
     try:
         features = extract_features(url)
-        X = pd.DataFrame([features])
+        # Filter and order the features according to the model's training specification
+        filtered_features = {k: features[k] for k in EXPECTED_FEATURES}
+        X = pd.DataFrame([filtered_features])[EXPECTED_FEATURES]
 
         proba = model.predict_proba(X)[0]
         classes = list(model.classes_)
 
-        # FIX: Explicitly get phishing class (1) probability
-        if 1 in classes:
-            phishing_idx = classes.index(1)
+        # Dynamically determine the index of 'bad' (phishing) label from the encoder classes
+        phishing_class = 0  # default fallback
+        if ENCODER_LOADED and encoder is not None:
+            try:
+                bad_classes = [i for i, c in enumerate(encoder.classes_) if str(c) == 'bad']
+                if bad_classes:
+                    phishing_class = bad_classes[0]
+            except Exception:
+                pass
+
+        if phishing_class in classes:
+            phishing_idx = classes.index(phishing_class)
         else:
-            phishing_idx = 1  # fallback
+            phishing_idx = 0  # fallback
 
         phishing_probability = float(proba[phishing_idx])
         predicted_class = model.predict(X)[0]
-        is_phishing = bool(predicted_class == 1)
+        is_phishing = bool(predicted_class == phishing_class)
 
         # FIX: Removed heuristic boosts here — scorer.py already applies
         # escalation rules for suspicious_tld, brand_impersonation, hyphens.

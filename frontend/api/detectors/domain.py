@@ -46,7 +46,19 @@ def analyze(url: str) -> dict:
 
     root_domain = _get_root_domain(url)
 
-
+    # FIX: TRUSTED_DOMAINS was defined but never actually used — every
+    # request, including for google.com itself, was paying for a live
+    # WHOIS API call. Skip it entirely for known-good domains.
+    if root_domain in TRUSTED_DOMAINS:
+        has_ssl = _check_real_ssl(url)
+        if not has_ssl:
+            threats.append("no_ssl")
+            score += 0.2
+        return {
+            "threats": threats,
+            "domain_score": round(min(score, 1.0), 4),
+            "domain_age_days": None
+        }
 
     # WHOIS lookup
     try:

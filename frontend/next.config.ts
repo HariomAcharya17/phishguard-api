@@ -3,6 +3,10 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   devIndicators: false,
   async rewrites() {
+    // In development, forward /api/* to the local FastAPI server
+    // (uvicorn api.index:app --port 8000). On Vercel, vercel.json routes
+    // /api/* to the Python function instead.
+    if (process.env.NODE_ENV !== "development") return [];
     return [
       {
         source: "/api/:path*",

@@ -1,17 +1,13 @@
-from fastapi import APIRouter, HTTPException
+from __future__ import annotations
+
+import secrets
+
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, EmailStr
-import uuid
-import os
-from dotenv import load_dotenv
-load_dotenv()
-from supabase import create_client
+
+from core import guest_limit, lookup_key, require_db, requests_today, DAILY_KEY_LIMIT
 
 router = APIRouter()
-
-supabase = create_client(
-    os.getenv("SUPABASE_URL"),
-    os.getenv("SUPABASE_KEY")
-)
 
 
 class SignupRequest(BaseModel):
@@ -19,63 +15,50 @@ class SignupRequest(BaseModel):
 
 
 def generate_api_key() -> str:
-    return f"pg_{uuid.uuid4().hex}"
+    return "pg_" + secrets.token_hex(24)
 
 
 @router.post("/signup")
-async def signup(request: SignupRequest):
+async def signup(body: SignupRequest, request: Request):
+    guest_limit(request)  # slows down bulk key creation
+    db = require_db()
+    email = body.email.lower()
     try:
-        # Check if email already exists
-        existing = supabase.table("api_keys")\
-            .select("*")\
-            .eq("email", request.email)\
-            .execute()
-
-        if existing.data and len(existing.data) > 0:
-            return {
-                "message": "Email already registered",
-                "api_key": existing.data[0]["api_key"],
-                "email": request.email
-            }
-
-        # Generate new API key
-        api_key = generate_api_key()
-
-        # Save to Supabase
-        supabase.table("api_keys").insert({
-            "email": request.email,
-            "api_key": api_key,
-            "requests": 0
-        }).execute()
-
-        return {
-            "message": "API key generated successfully",
-            "api_key": api_key,
-            "email": request.email
-        }
-
+        existing = db.table("api_keys").select("id").eq("email", email).limit(1).execute()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"[auth] lookup failed: {e}")
+        raise HTTPException(status_code=503, detail="Could not create a key right now. Try again shortly.")
+
+    if existing.data:
+        # Never return an existing key: anyone who knew the email could take it.
+        raise HTTPException(
+            status_code=409,
+            detail="A key was already issued for this email. Use the key you saved, or contact support to reset it.",
+        )
+
+    api_key = generate_api_key()
+    try:
+        db.table("api_keys").insert({"email": email, "api_key": api_key, "requests": 0}).execute()
+    except Exception as e:
+        print(f"[auth] insert failed: {e}")
+        raise HTTPException(status_code=503, detail="Could not create a key right now. Try again shortly.")
+
+    return {
+        "message": "API key created. Copy it now; it will not be shown again.",
+        "api_key": api_key,
+        "email": email,
+        "daily_limit": DAILY_KEY_LIMIT,
+    }
 
 
 @router.get("/validate")
 async def validate(api_key: str):
-    try:
-        result = supabase.table("api_keys")\
-            .select("*")\
-            .eq("api_key", api_key)\
-            .execute()
-
-        if not result.data or len(result.data) == 0:
-            raise HTTPException(status_code=401, detail="Invalid API key")
-
-        return {
-            "valid": True,
-            "email": result.data[0]["email"],
-            "requests": result.data[0]["requests"]
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    user = lookup_key(api_key)
+    used = requests_today(api_key)
+    return {
+        "valid": True,
+        "email": user["email"],
+        "requests_today": used,
+        "daily_limit": DAILY_KEY_LIMIT,
+        "remaining_today": max(0, DAILY_KEY_LIMIT - used),
+    }

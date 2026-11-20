@@ -1,157 +1,190 @@
+"""
+Runs every detector and turns their signals into one verdict.
+
+Scoring:
+  * Each detector emits Signals with a weight in [0, 1].
+  * Weights are combined with noisy-OR (see signals.combine), so each piece of
+    evidence counts once and independent evidence reinforces itself.
+  * A confirmed listing in a reputation feed sets a floor of 0.95.
+  * On well-known domains, URL-shape heuristics and the ML model are damped
+    (a bank's own login page legitimately says "login"), but reputation
+    feeds still apply in full.
+"""
+from __future__ import annotations
+
 import os
-import re
-from urllib.parse import urlparse
-from detectors import blacklist, pattern, domain, ml_model
+import time
+from concurrent.futures import ThreadPoolExecutor, wait
 
-def calculate_risk_level(score: float) -> str:
-    if score < 0.15: return "safe"
-    if score < 0.35: return "low"
-    if score < 0.65: return "medium"
-    if score < 0.85: return "high"
-    return "critical"
+from . import domain, lexical, ml_model, reputation
+from .brands import is_official
+from .signals import Signal, combine
+from .urlparts import InvalidURL, ParsedURL, parse
 
-def get_recommendation(score: float) -> str:
-    if score < 0.25:
-        return "This URL appears safe. No malicious signatures were detected."
-    if score < 0.5:
-        return "Exercise caution. Minor suspicious patterns detected."
-    if score < 0.75:
-        return "High risk. This URL exhibits multiple phishing characteristics."
-    return "Dangerous. Strongly recommended to avoid this URL."
+_pool = ThreadPoolExecutor(max_workers=16)
+NETWORK_BUDGET_S = 8.0
 
-def _brand_in_domain(hostname: str, brands: list) -> bool:
-    hostname = hostname.lower()
-    for brand in brands:
-        if brand in hostname:
-            # If it's exactly the brand's domain (or subdomain of it), it's safe
-            # e.g. 'paypal.com' or 'service.paypal.com'
-            if hostname == brand + ".com" or hostname.endswith("." + brand + ".com"):
-                return False
-            return True
-    return False
+BRAND_SIGNALS = {"lookalike_domain", "brand_in_domain", "brand_other_tld", "brand_in_subdomain", "brand_with_account_words"}
 
-def analyze(url: str) -> dict:
-    all_threats = []
-    
+LEVELS = [(0.2, "safe"), (0.4, "low"), (0.6, "medium"), (0.8, "high"), (1.01, "critical")]
+
+VERDICTS = {
+    "safe": "No signs of phishing found.",
+    "low": "Mostly fine, with minor warning signs.",
+    "medium": "Suspicious. Several phishing traits found.",
+    "high": "Likely phishing.",
+    "critical": "Phishing or malicious. Do not open.",
+}
+ADVICE = {
+    "safe": "No warning signs were found. Still check the address bar before entering a password.",
+    "low": "Probably legitimate, but confirm the address is the one you expect before signing in or paying.",
+    "medium": "Do not enter passwords, card numbers or OTPs here. Reach the service by typing its address yourself.",
+    "high": "Avoid this link. If it came by email or SMS, report it and delete the message.",
+    "critical": "Do not open this link. If you already entered details, change your password and contact your bank or the service immediately.",
+}
+
+LAYER_DESCRIPTIONS = {
+    "reputation": "VirusTotal, Google Safe Browsing and OpenPhish lookups for this link and domain.",
+    "url": "Rules for brand impersonation, look-alike domains, hosting platforms and obfuscation tricks.",
+    "domain": "Registration age, DNS, HTTPS and where the link redirects.",
+    "ml": "Gradient-boosted tree model scoring the hostname's structure, trained on the PhiUSIIL dataset.",
+}
+
+
+def level_for(score: float) -> str:
+    return next(name for limit, name in LEVELS if score < limit)
+
+
+def _safe_call(fn, *args):
     try:
-        parsed = urlparse(url)
-        hostname = (parsed.hostname or "").lower()
-    except Exception:
-        hostname = url.lower()
+        return fn(*args)
+    except Exception as e:  # a failing source must never fail the scan
+        print(f"[scorer] {getattr(fn, '__name__', fn)} failed: {type(e).__name__}: {e}")
+        return [], {"status": "error"}
 
-    url_lower = url.lower()
 
-    # Layer 1 — Blacklist (VirusTotal)
-    blacklist_result = blacklist.analyze(url)
-    
-    # Layer 2 — Pattern Analysis (Heuristics)
-    pattern_result = pattern.analyze(url)
-    
-    # Layer 3 — Domain Intelligence (WHOIS/SSL)
-    domain_result = domain.analyze(url)
-    
-    # Layer 4 — ML Detection (Random Forest)
-    ml_result = ml_model.predict(url)
+def analyze(raw_url: str, network: bool | None = None) -> dict:
+    if network is None:
+        network = os.getenv("PHISHGUARD_OFFLINE") != "1"
+    started = time.perf_counter()
+    p = parse(raw_url)  # raises InvalidURL
 
-    # Base weighted score
-    final_score = (
-        blacklist_result.get("blacklist_score", 0.0) * 0.35 +
-        ml_result.get("ml_score", 0.0)              * 0.35 +
-        pattern_result.get("pattern_score", 0.0)    * 0.20 +
-        domain_result.get("domain_score", 0.0)      * 0.10
-    )
+    url_signals, facts = lexical.analyze(p)
+    well_known = facts.get("well_known", False) and not facts.get("content_hosted", False)
+    ml_signals, ml_prob = ml_model.analyze(p, well_known)
 
-    # ==================================================
-    # RISK ESCALATION RULES
-    # ==================================================
+    checks: dict[str, dict] = {}
+    rep_signals: list[Signal] = []
+    dom_signals: list[Signal] = []
 
-    # 1. Suspicious TLDs
-    suspicious_tlds = [
-        ".tk", ".ml", ".ga", ".cf", ".gq",
-        ".xyz", ".top", ".click", ".work",
-        ".loan", ".online", ".site", ".live", ".icu"
-    ]
-    if any(hostname.endswith(tld) for tld in suspicious_tlds):
-        final_score += 0.20
-        all_threats.append("suspicious_tld_escalation")
-
-    # 2. Brand Impersonation
-    brands = [
-        "paypal", "facebook", "instagram", "amazon",
-        "apple", "microsoft", "netflix", "bank",
-        "steam", "google", "twitter", "linkedin",
-        "paytm", "binance", "coinbase", "kraken",
-        "dropbox", "chase", "wellsfargo", "citibank"
-    ]
-    if _brand_in_domain(hostname, brands):
-        final_score += 0.35
-        all_threats.append("brand_impersonation_detected")
-
-    # 3. Phishing Keywords
-    danger_keywords = [
-        "login", "verify", "secure", "update", "password",
-        "signin", "confirm", "billing", "session", "account",
-        "banking", "alert", "credential", "auth",
-        "validation", "reset", "recover"
-    ]
-    keyword_matches = sum(kw in url_lower for kw in danger_keywords)
-    if keyword_matches >= 2:
-        final_score += 0.15
-        all_threats.append("multiple_phishing_keywords")
-
-    # 4. Domain Age
-    domain_age = domain_result.get("domain_age_days")
-    if domain_age is not None:
-        if domain_age < 30:
-            final_score += 0.25
-            all_threats.append("newly_registered_domain")
-        elif domain_age < 90:
-            final_score += 0.10
-            all_threats.append("recently_registered_domain")
-
-    # ==================================================
-    # FINAL AGGREGATION
-    # ==================================================
-
-    final_score = min(final_score, 1.0)
-    final_score = round(final_score, 4)
-
-    is_safe = final_score < 0.25
-
-    # Aggregate threats from all layers
-    all_threats.extend(blacklist_result.get("threats", []))
-    all_threats.extend(pattern_result.get("threats", []))
-    all_threats.extend(domain_result.get("threats", []))
-    
-    return {
-        "url": url,
-        "is_safe": is_safe,
-        "risk_score": final_score,
-        "risk_level": calculate_risk_level(final_score),
-        "threats_detected": list(set(all_threats)),
-        "ml_score": ml_result.get("ml_score", 0.0),
-        "domain_age_days": domain_result.get("domain_age_days"),
-        "recommendation": get_recommendation(final_score),
-        "breakdown": {
-            "blacklist": {
-                "score": blacklist_result.get("blacklist_score", 0.0),
-                "threats": blacklist_result.get("threats", []),
-                "description": "Cross-references global databases for known malicious signatures."
-            },
-            "pattern": {
-                "score": pattern_result.get("pattern_score", 0.0),
-                "threats": pattern_result.get("threats", []),
-                "description": "Examines URL structure and character distribution for obfuscation."
-            },
-            "domain": {
-                "score": domain_result.get("domain_score", 0.0),
-                "threats": domain_result.get("threats", []),
-                "description": "Evaluates domain age, SSL status, and historical reputation."
-            },
-            "ml": {
-                "score": ml_result.get("ml_score", 0.0),
-                "threats": ["Deep learning inference complete"],
-                "description": "Neural classifier trained on millions of samples for zero-day detection."
-            }
+    if network and p.host:
+        jobs = {
+            # Shared services (shorteners, hosting platforms, big sites) get
+            # flagged at domain level because of their users; only use the
+            # domain fallback for ordinary domains.
+            "virustotal": _pool.submit(
+                _safe_call, reputation.virustotal, p,
+                not (well_known or facts.get("shortener") or facts.get("hosting_platform")),
+            ),
+            "safe_browsing": _pool.submit(_safe_call, reputation.safe_browsing, p),
+            "openphish": _pool.submit(_safe_call, reputation.openphish, p),
+            "whois": _pool.submit(_safe_call, domain.domain_age, p),
+            "dns": _pool.submit(_safe_call, domain.dns_and_redirects, p),
         }
+        wait(jobs.values(), timeout=NETWORK_BUDGET_S)
+        for name, fut in jobs.items():
+            if not fut.done():
+                checks[name] = {"status": "timeout"}
+                continue
+            sigs, info = fut.result()
+            checks[name] = info
+            (rep_signals if name in ("virustotal", "safe_browsing", "openphish") else dom_signals).extend(sigs)
+    else:
+        for name in ("virustotal", "safe_browsing", "openphish", "whois", "dns"):
+            checks[name] = {"status": "skipped"}
+
+    # If the link redirects elsewhere (shorteners, tracking links), judge the
+    # destination's URL too and keep whichever evidence is stronger.
+    final_url = checks.get("dns", {}).get("final_url")
+    if final_url and final_url != p.url:
+        try:
+            fp = parse(final_url)
+            if fp.registrable != p.registrable:
+                dest_signals, dest_facts = lexical.analyze(fp)
+                dest_known = dest_facts.get("well_known") and not dest_facts.get("content_hosted")
+                for sg in dest_signals:
+                    if sg.id in ("http_only",):
+                        continue
+                    sg.id = "destination_" + sg.id
+                    sg.detail = f"After redirecting to {fp.host}: {sg.detail}"
+                    url_signals.append(sg)
+                # Brands often register look-alikes of their own name and
+                # redirect them home (paypa1.com -> paypal.com).
+                owner = [b for b in facts.get("brands", []) if is_official(b, fp.registrable, fp.host)]
+                if owner:
+                    for sg in url_signals:
+                        if sg.id in BRAND_SIGNALS:
+                            sg.weight *= 0.2
+                    url_signals.append(Signal(
+                        "redirects_to_official", "url", f"Redirects to the official {owner[0]} site",
+                        f"The link forwards to {fp.host}, which belongs to {owner[0]}. This is likely a domain the company registered to protect its name.",
+                        0.0))
+                if facts.get("shortener") and dest_known:
+                    # A shortener pointing at a well-known site is ordinary.
+                    for sg in url_signals:
+                        if sg.id == "url_shortener":
+                            sg.weight = 0.05
+        except InvalidURL:
+            pass
+
+    if well_known:
+        for sg in url_signals + ml_signals + dom_signals:
+            sg.weight *= 0.25
+        rep_signals = [sg for sg in rep_signals if sg.id != "openphish_host"]
+
+    signals = rep_signals + url_signals + dom_signals + ml_signals
+    score = combine([sg.weight for sg in signals])
+    confirmed = any(sg.confirmed for sg in signals)
+    if confirmed:
+        score = max(score, 0.95)
+    score = round(min(score, 1.0), 4)
+    level = level_for(score)
+
+    def layer(name: str, sigs: list[Signal]) -> dict:
+        return {
+            "score": round(combine([sg.weight for sg in sigs]), 4),
+            "threats": [sg.id for sg in sigs],
+            "description": LAYER_DESCRIPTIONS[name],
+        }
+
+    ordered = sorted(signals, key=lambda sg: (not sg.confirmed, -sg.weight))
+    whois = checks.get("whois", {})
+
+    return {
+        "url": p.url,
+        "input": p.original,
+        "host": p.host_unicode or p.host,
+        "registrable_domain": p.registrable or None,
+        "is_safe": level == "safe",
+        "risk_score": score,
+        "risk_level": level,
+        "verdict": VERDICTS[level],
+        "recommendation": ADVICE[level],
+        "confirmed_malicious": confirmed,
+        "signals": [sg.to_dict() for sg in ordered if sg.weight > 0.0 or sg.id == "redirects_to_official"],
+        "threats_detected": [sg.id for sg in ordered if sg.weight >= 0.1],
+        "ml_score": round(ml_prob, 4) if ml_prob is not None else None,
+        "domain_age_days": whois.get("age_days"),
+        "domain_created": whois.get("created"),
+        "final_url": final_url,
+        "well_known_domain": well_known,
+        "brands_detected": sorted(set(facts.get("brands", []))),
+        "checks": checks,
+        "breakdown": {
+            "blacklist": layer("reputation", rep_signals),
+            "pattern": layer("url", url_signals),
+            "domain": layer("domain", dom_signals),
+            "ml": layer("ml", ml_signals),
+        },
+        "analysis_ms": round((time.perf_counter() - started) * 1000),
     }

@@ -1,279 +1,67 @@
-import pickle
-import pandas as pd
-import re
-from math import log2
+"""
+Domain classifier: gradient-boosted trees over hostname features.
+
+The model is stored as plain JSON (see ml/train_domain_model.py) and scored
+in pure Python, so the API needs no scikit-learn, pandas or numpy at runtime
+and is immune to pickle version mismatches.
+"""
+from __future__ import annotations
+
+import json
+import math
 import os
-import gzip
-from urllib.parse import urlparse
 
-# =====================================================
-# LOAD MODEL & ENCODER
-# =====================================================
+from .features import FEATURE_NAMES, host_features
+from .signals import Signal
+from .urlparts import ParsedURL
 
-BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+_MODEL_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "model", "domain_model.json")
 
 try:
-    with gzip.open(os.path.join(BASE_DIR, 'phishing_model.pkl.gz'), 'rb') as f:
-        model = pickle.load(f)
+    with open(_MODEL_PATH, encoding="utf-8") as f:
+        _MODEL = json.load(f)
+    if _MODEL.get("features") != FEATURE_NAMES:
+        raise ValueError("feature list in model file does not match features.py")
     MODEL_LOADED = True
-except Exception as e:
-    model = None
+except Exception as e:  # pragma: no cover - logged, API keeps working without ML
+    _MODEL = None
     MODEL_LOADED = False
-    print(f"[ml_model] WARNING: Could not load model: {e}")
-
-try:
-    with open(os.path.join(BASE_DIR, 'label_encoder.pkl'), 'rb') as f:
-        encoder = pickle.load(f)
-    ENCODER_LOADED = True
-except Exception as e:
-    encoder = None
-    ENCODER_LOADED = False
-    print(f"[ml_model] WARNING: Could not load encoder: {e}")
-
-# The exact 17 features in correct order expected by the trained ML model
-EXPECTED_FEATURES = [
-    'url_length',
-    'num_dots',
-    'num_hyphens',
-    'num_slashes',
-    'num_at',
-    'num_question',
-    'num_equal',
-    'num_underscore',
-    'num_percent',
-    'has_ip',
-    'has_https',
-    'entropy',
-    'has_suspicious_keyword',
-    'domain_length',
-    'num_subdomains',
-    'num_digits',
-    'num_special'
-]
+    print(f"[ml_model] model not loaded: {e}")
 
 
-# =====================================================
-# TRUSTED DOMAINS — ML skips heuristic boosts for these
-# =====================================================
-
-TRUSTED_DOMAINS = {
-    "facebook.com", "google.com", "youtube.com", "instagram.com",
-    "twitter.com", "x.com", "linkedin.com", "github.com",
-    "microsoft.com", "apple.com", "amazon.com", "netflix.com",
-    "paypal.com", "wikipedia.org", "reddit.com", "whatsapp.com",
-    "paytm.com", "binance.com", "coinbase.com", "dropbox.com",
-    "zoom.us", "slack.com", "notion.so", "figma.com"
-}
-
-# Brand names that are suspicious ONLY on foreign domains
-BRAND_NAMES = [
-    'paypal', 'facebook', 'instagram', 'amazon', 'apple',
-    'microsoft', 'netflix', 'steam', 'google', 'twitter',
-    'linkedin', 'paytm', 'binance', 'coinbase', 'ebay'
-]
-
-# Pure phishing action words — suspicious on ANY domain
-PHISHING_KEYWORDS = [
-    'login', 'verify', 'secure', 'account', 'update',
-    'banking', 'confirm', 'signin', 'password',
-    'billing', 'session', 'credential', 'auth',
-    'validate', 'recover', 'reset', 'urgent'
-]
-
-SUSPICIOUS_TLDS = [
-    '.tk', '.ml', '.ga', '.cf', '.gq', '.xyz',
-    '.top', '.click', '.work', '.support',
-    '.loan', '.online', '.site', '.live', '.icu'
-]
+def _tree_value(tree: dict, x: list[float]) -> float:
+    left, right, feat, thr, val = tree["l"], tree["r"], tree["f"], tree["t"], tree["v"]
+    node = 0
+    while left[node] != -1:
+        node = left[node] if x[feat[node]] <= thr[node] else right[node]
+    return val[node]
 
 
-def _get_root_domain(url: str) -> str:
-    try:
-        hostname = urlparse(url).hostname or ""
-        hostname = hostname.lower().replace("www.", "")
-        parts = hostname.split(".")
-        return ".".join(parts[-2:]) if len(parts) >= 2 else hostname
-    except Exception:
-        return ""
+def probability(p: ParsedURL) -> float | None:
+    """Probability that the hostname belongs to a phishing site, or None."""
+    if not MODEL_LOADED or not p.host:
+        return None
+    x = host_features(p.host, p.domain, p.suffix, p.subdomain, p.is_ip)
+    raw = _MODEL["init"] + _MODEL["learning_rate"] * sum(_tree_value(t, x) for t in _MODEL["trees"])
+    return 1.0 / (1.0 + math.exp(-raw))
 
 
-def _get_hostname(url: str) -> str:
-    try:
-        return (urlparse(url).hostname or "").lower()
-    except Exception:
-        return ""
-
-
-def _check_brand_on_foreign_domain(url_lower: str, root_domain: str) -> bool:
-    """
-    Returns True only if a brand keyword appears in a URL
-    that does NOT belong to that brand.
-    e.g. 'paypal-login.net' → True, 'paypal.com' → False
-    """
-    for brand in BRAND_NAMES:
-        if brand in url_lower:
-            # If root domain IS the brand's legitimate domain (exactly), skip
-            # e.g. root_domain is 'paypal.com' or 'google.com'
-            if root_domain == brand + ".com" or root_domain == brand + ".org" or root_domain == brand + ".net":
-                continue
-            return True
-    return False
-
-
-# =====================================================
-# FEATURE EXTRACTION
-# =====================================================
-
-def extract_features(url: str) -> dict:
-    features = {}
-    url_lower = url.lower()
-    root_domain = _get_root_domain(url)
-    hostname = _get_hostname(url)
-    is_trusted = root_domain in TRUSTED_DOMAINS
-
-    # ── Basic URL Structure ──
-    features['url_length']     = len(url)
-    features['num_dots']       = url.count('.')
-    features['num_hyphens']    = url.count('-')
-    features['num_slashes']    = url.count('/')
-    features['num_at']         = url.count('@')
-    features['num_question']   = url.count('?')
-    features['num_equal']      = url.count('=')
-    features['num_underscore'] = url.count('_')
-    features['num_percent']    = url.count('%')
-
-    # ── IP Address Detection ──
-    features['has_ip'] = 1 if re.search(r'\d+\.\d+\.\d+\.\d+', url) else 0
-
-    # ── HTTPS ──
-    # FIX: Use resolved hostname SSL check instead of raw URL scheme.
-    # If user typed http:// but site redirects to https, don't penalize.
-    # We approximate this by trusting known-safe domains have SSL.
-    if is_trusted:
-        features['has_https'] = 1  # Trusted domains always have SSL
-    else:
-        features['has_https'] = 1 if url.startswith('https') else 0
-
-    # ── URL Entropy ──
-    if len(url) > 0:
-        prob = [float(url.count(c)) / len(url) for c in set(url)]
-        features['entropy'] = -sum(p * log2(p) for p in prob if p > 0)
-    else:
-        features['entropy'] = 0.0
-
-    # ── Phishing Action Keywords (safe on any domain) ──
-    phishing_hits = sum(word in url_lower for word in PHISHING_KEYWORDS)
-    features['has_suspicious_keyword'] = 1 if phishing_hits > 0 else 0
-    features['danger_keyword_count']   = phishing_hits
-
-    # ── Suspicious TLDs ──
-    features['suspicious_tld'] = 1 if any(
-        hostname.endswith(tld) for tld in SUSPICIOUS_TLDS
-    ) else 0
-
-    # ── Brand Impersonation ──
-    # FIX: Only flag if brand appears on a FOREIGN domain, not the brand's own domain
-    features['brand_impersonation'] = (
-        0 if is_trusted
-        else (1 if _check_brand_on_foreign_domain(url_lower, root_domain) else 0)
-    )
-
-    # ── Excessive Hyphens ──
-    features['many_hyphens'] = 1 if url.count('-') >= 3 else 0
-
-    # ── Domain Length ──
-    try:
-        domain = url.split('/')[2] if '/' in url else url
-        features['domain_length'] = len(domain)
-    except Exception:
-        features['domain_length'] = 0
-
-    # ── Subdomains ──
-    try:
-        domain = url.split('/')[2] if '/' in url else url
-        parts = domain.split('.')
-        features['num_subdomains'] = len(parts) - 2 if len(parts) > 2 else 0
-    except Exception:
-        features['num_subdomains'] = 0
-
-    # ── Digits ──
-    features['num_digits'] = sum(c.isdigit() for c in url)
-
-    # ── Special Characters ──
-    features['num_special'] = sum(
-        1 for c in url
-        if not c.isalnum() and c not in ['.', '/', ':', '-', '_']
-    )
-
-    # ── Long URL ──
-    features['long_url'] = 1 if len(url) > 100 else 0
-
-    return features
-
-
-# =====================================================
-# PREDICTION
-# =====================================================
-
-def predict(url: str) -> dict:
-    root_domain = _get_root_domain(url)
-    is_trusted = root_domain in TRUSTED_DOMAINS
-
-
-
-    # Model not loaded — return neutral 0.0, not 0.5
-    # scorer will rely more on other layers
-    if not MODEL_LOADED or model is None:
-        return {
-            "ml_score": 0.0,
-            "is_phishing": False,
-            "error": "Model not loaded"
-        }
-
-    try:
-        features = extract_features(url)
-        # Filter and order the features according to the model's training specification
-        filtered_features = {k: features[k] for k in EXPECTED_FEATURES}
-        X = pd.DataFrame([filtered_features])[EXPECTED_FEATURES]
-
-        proba = model.predict_proba(X)[0]
-        classes = list(model.classes_)
-
-        # Dynamically determine the index of 'bad' (phishing) label from the encoder classes
-        phishing_class = 0  # default fallback
-        if ENCODER_LOADED and encoder is not None:
-            try:
-                bad_classes = [i for i, c in enumerate(encoder.classes_) if str(c) == 'bad']
-                if bad_classes:
-                    phishing_class = bad_classes[0]
-            except Exception:
-                pass
-
-        if phishing_class in classes:
-            phishing_idx = classes.index(phishing_class)
-        else:
-            phishing_idx = 0  # fallback
-
-        phishing_probability = float(proba[phishing_idx])
-        predicted_class = model.predict(X)[0]
-        is_phishing = bool(predicted_class == phishing_class)
-
-        # FIX: Removed heuristic boosts here — scorer.py already applies
-        # escalation rules for suspicious_tld, brand_impersonation, hyphens.
-        # Double-counting inflated scores significantly.
-        final_score = min(phishing_probability, 1.0)
-
-        return {
-            "ml_score": round(final_score, 4),
-            "is_phishing": is_phishing,
-            "features": features
-        }
-
-    except Exception as e:
-        # FIX: Return 0.0 on failure, not 0.5
-        # A broken model should not push scores up
-        return {
-            "ml_score": 0.0,
-            "is_phishing": False,
-            "error": str(e)
-        }
+def analyze(p: ParsedURL, well_known: bool) -> tuple[list[Signal], float | None]:
+    prob = probability(p)
+    if prob is None:
+        return [], None
+    signals: list[Signal] = []
+    # Only confident predictions contribute; a well-known domain is never
+    # penalized for its shape (short brand names look "random" to the model).
+    if not well_known and prob >= 0.6:
+        # Capped below the strongest rules: the model also sees the domain
+        # ending, so a suspicious TLD is partly counted here already.
+        weight = min(0.45, (prob - 0.5) * 1.0)
+        signals.append(Signal(
+            id="ml_suspicious_host",
+            layer="ml",
+            title="Hostname resembles known phishing domains",
+            detail=f"The domain classifier rates this hostname {round(prob * 100)}% similar to phishing domains it was trained on.",
+            weight=weight,
+        ))
+    return signals, prob

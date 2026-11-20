@@ -1,117 +1,93 @@
-import requests
+"""
+Domain intelligence: registration age (WHOIS), DNS, and where the link
+really ends up after redirects (followed safely, see netsafe.py).
+"""
+from __future__ import annotations
+
 import os
-from datetime import datetime
-from urllib.parse import urlparse
+from datetime import datetime, timezone
 
-WHOIS_API_KEY = os.getenv("WHOIS_API_KEY")
+import requests
 
-# Trusted domains — skip WHOIS entirely, treat as established
-TRUSTED_DOMAINS = {
-    "facebook.com", "google.com", "youtube.com", "instagram.com",
-    "twitter.com", "x.com", "linkedin.com", "github.com",
-    "microsoft.com", "apple.com", "amazon.com", "netflix.com",
-    "paypal.com", "wikipedia.org", "reddit.com", "whatsapp.com",
-    "paytm.com", "binance.com", "coinbase.com", "dropbox.com",
-    "zoom.us", "slack.com", "notion.so", "figma.com"
-}
+from . import netsafe
+from .reputation import _cached
+from .signals import Signal
+from .urlparts import ParsedURL, parse, InvalidURL
 
 
-def _get_root_domain(url: str) -> str:
+def _whois_created(domain: str, key: str) -> str | None:
+    r = requests.get("https://api.ip2whois.com/v2", params={"key": key, "domain": domain, "format": "json"}, timeout=5)
+    if r.status_code != 200:
+        raise requests.RequestException(f"status {r.status_code}")
+    return r.json().get("create_date")
+
+
+def domain_age(p: ParsedURL) -> tuple[list[Signal], dict]:
+    key = os.getenv("WHOIS_API_KEY")
+    if not p.registrable:
+        return [], {"status": "not_applicable"}
+    if not key:
+        return [], {"status": "not_configured"}
     try:
-        hostname = urlparse(url).hostname or ""
-        hostname = hostname.lower().replace("www.", "")
-        parts = hostname.split(".")
-        return ".".join(parts[-2:]) if len(parts) >= 2 else hostname
-    except Exception:
-        return url
-
-
-def _check_real_ssl(url: str) -> bool:
-    """
-    Follow redirects and check if the FINAL resolved URL uses HTTPS.
-    This avoids penalizing sites where user typed http:// but site redirects to https://.
-    """
+        created = _cached(f"whois:{p.registrable}", 86400, lambda: _whois_created(p.registrable, key))
+    except requests.RequestException:
+        return [], {"status": "error"}
+    if not created:
+        return [], {"status": "redacted"}
     try:
-        response = requests.head(url, allow_redirects=True, timeout=5)
-        return response.url.startswith("https")
-    except Exception:
-        # Cannot determine — do NOT penalize
-        return True
+        created_dt = datetime.fromisoformat(created.replace("Z", "+00:00")[:19]).replace(tzinfo=timezone.utc)
+    except ValueError:
+        try:
+            created_dt = datetime.strptime(created[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            return [], {"status": "unparsed"}
+    days = max(0, (datetime.now(timezone.utc) - created_dt).days)
+    info = {"status": "ok", "created": created_dt.date().isoformat(), "age_days": days}
+    if days < 30:
+        return [Signal("new_domain", "domain", "Registered in the last 30 days",
+                       f"{p.registrable} was registered {days} day{'s' if days != 1 else ''} ago. Most phishing domains are used within weeks of registration.", 0.5)], info
+    if days < 180:
+        return [Signal("young_domain", "domain", "Registered recently",
+                       f"{p.registrable} is about {days // 30} months old.", 0.2)], info
+    if days < 365:
+        return [Signal("under_a_year", "domain", "Less than a year old", f"{p.registrable} is {days} days old.", 0.06)], info
+    return [], info
 
 
-def analyze(url: str) -> dict:
-    threats = []
-    score = 0.0
-    domain_age_days = None
+def dns_and_redirects(p: ParsedURL, follow: bool = True) -> tuple[list[Signal], dict]:
+    signals: list[Signal] = []
+    info: dict = {}
+    if p.is_ip:
+        info["resolves"] = True
+    else:
+        try:
+            ips = netsafe.resolve(p.host)
+        except netsafe.BlockedDestination:
+            info.update(resolves=True, public=False)
+            signals.append(Signal("non_public_host", "domain", "Resolves to a private address",
+                                  f"{p.host} points to an internal network address, not a public website.", 0.35))
+            return signals, info
+        info["resolves"] = bool(ips)
+        if not ips:
+            signals.append(Signal("no_dns", "domain", "Domain does not resolve",
+                                  f"{p.host} has no DNS record. It may have been taken down, or never existed.", 0.25))
+            return signals, info
 
-    root_domain = _get_root_domain(url)
+    if not follow:
+        return signals, info
 
-    # FIX: TRUSTED_DOMAINS was defined but never actually used — every
-    # request, including for google.com itself, was paying for a live
-    # WHOIS API call. Skip it entirely for known-good domains.
-    if root_domain in TRUSTED_DOMAINS:
-        has_ssl = _check_real_ssl(url)
-        if not has_ssl:
-            threats.append("no_ssl")
-            score += 0.2
-        return {
-            "threats": threats,
-            "domain_score": round(min(score, 1.0), 4),
-            "domain_age_days": None
-        }
-
-    # WHOIS lookup
+    res = netsafe.follow_redirects(p.url)
+    info.update(final_url=res.final_url, redirects=len(res.hops) - 1, http_status=res.status, fetch_error=res.error)
     try:
-        response = requests.get(
-            "https://api.ip2whois.com/v2",
-            params={
-                "key": WHOIS_API_KEY,
-                "domain": root_domain,
-                "format": "json"
-            },
-            timeout=5
-        )
-
-        data = response.json()
-        created_at = data.get("create_date", None)
-
-        if created_at:
-            try:
-                created_date = datetime.strptime(created_at[:10], "%Y-%m-%d")
-                domain_age_days = (datetime.now() - created_date).days
-
-                if domain_age_days < 30:
-                    threats.append("very_young_domain")
-                    score += 0.4
-                elif domain_age_days < 90:
-                    threats.append("young_domain")
-                    score += 0.2
-                # Domain >= 90 days old — no penalty
-            except Exception:
-                # Date parse failed — treat as unknown, small penalty
-                threats.append("unknown_domain_age")
-                score += 0.05
-        else:
-            # No creation date returned — many legitimate domains redact this
-            # FIX: was 0.2, reduced to 0.05 to avoid false positives
-            threats.append("no_creation_date")
-            score += 0.05
-
-    except Exception:
-        # FIX: WHOIS API failure ≠ suspicious domain
-        # Could be rate limiting, network error, or privacy protection
-        # Do NOT penalize — just note it
-        threats.append("whois_lookup_failed")
-        score += 0.0
-
-    # FIX: Check REAL SSL by following redirects, not just the user-typed URL scheme
-    has_ssl = _check_real_ssl(url)
-    if not has_ssl:
-        threats.append("no_ssl")
-        score += 0.2
-
-    return {
-        "threats": threats,
-        "domain_score": round(min(score, 1.0), 4),
-        "domain_age_days": domain_age_days
-    }
+        final = parse(res.final_url)
+    except InvalidURL:
+        final = None
+    if final and final.registrable and p.registrable and final.registrable != p.registrable and len(res.hops) > 1:
+        info["redirects_to"] = final.registrable
+        signals.append(Signal("cross_domain_redirect", "domain", "Redirects to a different site",
+                              f"Opening the link sends you to {final.host}.", 0.1))
+    if res.error is None and final and final.scheme == "http":
+        signals.append(Signal("no_https", "domain", "No HTTPS",
+                              "The page is served without encryption, so anything entered on it can be intercepted.", 0.15))
+    info["final_https"] = bool(final and final.scheme == "https" and res.error is None)
+    return signals, info

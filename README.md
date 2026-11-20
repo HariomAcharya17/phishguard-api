@@ -2,7 +2,7 @@
 
 Phishing link checker and API. Paste a URL and get a verdict, a 0–100 risk score and a plain-language list of everything that was found.
 
-Built by Hariom Acharya.
+Built by [Hariom Acharya](https://github.com/HariomAcharya17). Live at **[phishguard-api.vercel.app](https://phishguard-api.vercel.app)**.
 
 ## How a link is checked
 
@@ -25,6 +25,16 @@ Each finding is a weighted signal. Signals are combined with noisy-OR, so indepe
 | Hostname model, held-out domains | ROC AUC 0.88, precision 0.93 at 0.5 |
 
 With reputation lookups enabled, links already known to feeds are caught regardless of how their address looks.
+
+### Risk levels
+
+| Score | Level | Shown as | Meaning |
+|---|---|---|---|
+| 0.00 – 0.19 | `safe` | Safe | No warning signs found |
+| 0.20 – 0.39 | `low` | Low risk | Minor warning signs |
+| 0.40 – 0.59 | `medium` | Suspicious | Several phishing traits |
+| 0.60 – 0.79 | `high` | High risk | Likely phishing |
+| 0.80 – 1.00 | `critical` | Dangerous | Phishing, or confirmed by a reputation feed |
 
 ## Project layout
 
@@ -86,3 +96,22 @@ Create a Supabase project and run `supabase/schema.sql` in the SQL editor.
 ```
 
 Dataset: Prasad, A. & Chandra, S. (2023). *PhiUSIIL: A diverse security profile empowered phishing URL detection framework.* UCI Machine Learning Repository, id 967. Only hostnames are used, because every legitimate URL in the dataset is a bare homepage.
+
+## Security notes
+
+- Provider keys (VirusTotal, Safe Browsing, WHOIS, Supabase) are read only by the server and never sent to the browser.
+- An existing API key is never returned on signup; it is shown once when created.
+- Links are fetched server-side only to follow redirects. Every hop is resolved and private, loopback and cloud-metadata addresses are refused.
+- CORS allows any origin without credentials, which suits a public API.
+- `.env` files are git-ignored.
+
+## License
+
+Open source. Feel free to fork, modify and use it in your own projects.
+
+## Contributing
+
+1. Fork the repository.
+2. Create a branch: `git checkout -b feature/your-change`.
+3. Run the tests: `.venv/bin/python -m pytest tests`.
+4. Commit, push and open a pull request.

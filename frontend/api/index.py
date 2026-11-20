@@ -44,6 +44,11 @@ async def validation_error(_: Request, exc: RequestValidationError):
     return JSONResponse(status_code=422, content={"detail": f"Invalid {field}: {first.get('msg', 'bad value')}"})
 
 
+@app.exception_handler(404)
+async def not_found(request: Request, _exc):
+    return JSONResponse(status_code=404, content={"detail": "Not found.", "path": request.url.path})
+
+
 @app.exception_handler(Exception)
 async def unhandled(_: Request, exc: Exception):
     print(f"[api] unhandled {type(exc).__name__}: {exc}")

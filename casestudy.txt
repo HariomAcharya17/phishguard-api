@@ -1,0 +1,252 @@
+PHISHGUARD - CASE STUDY NOTES
+Phishing link checker and public API: paste a URL, get a verdict, a 0-100 risk score and a
+plain-language list of every warning sign that was found.
+Built by Hariom Acharya.
+Live: https://your-phish-guard.vercel.app/   (API docs at /api/docs)
+Code: https://github.com/HariomAcharya17/phishguard-api
+
+This file explains what the project does, how it is built, which models, rules and settings it
+uses and why, and what results it got, so you can explain it in an interview.
+
+
+======================================================================
+1. THE PROBLEM AND THE IDEA
+======================================================================
+Phishing links copy real brands (paypa1.com, sbi-login.xyz, google.com.secure-check.top) to steal
+passwords, card numbers and OTPs. A single check is easy to fool:
+  - a blacklist only knows links that were already reported,
+  - a machine learning model alone gives no reason a person can understand,
+  - simple rules flag real banks because their own pages say "login".
+
+PhishGuard combines four independent layers, turns every finding into a weighted "signal", and
+explains each one in plain words.
+
+
+======================================================================
+2. FOLDER STRUCTURE
+======================================================================
+phishguard-api/
+  frontend/                      Next.js website + Python API, deployed together on Vercel
+    api/index.py                 FastAPI app (all /api/* routes, error handlers, CORS)
+    api/core.py                  Supabase client, API keys, daily and guest rate limits
+    api/routes/check.py          POST /api/check-url
+    api/routes/auth.py           POST /api/auth/signup, GET /api/auth/validate
+    api/routes/analytics.py      GET /api/analytics (per API key)
+    api/detectors/
+      urlparts.py                parses and normalises the URL (host, registrable domain, subdomain, IP, punycode)
+      lexical.py                 address rules (brand impersonation, look-alikes, tricks)
+      brands.py                  brand list: what attackers type -> the brand's official domains
+      reputation.py              VirusTotal, Google Safe Browsing, OpenPhish (with caching)
+      domain.py                  WHOIS age, DNS, HTTPS, redirects
+      netsafe.py                 safe outbound requests (SSRF protection)
+      features.py                20 hostname features for the ML model
+      ml_model.py                runs the exported gradient-boosted trees in pure Python
+      signals.py                 the Signal object and the noisy-OR combine()
+      scorer.py                  runs everything, damps well-known domains, builds the final verdict
+    api/model/domain_model.json  the trained model (250 trees, 170 KB of JSON)
+    api/requirements.txt         fastapi, pydantic, email-validator, requests, supabase, python-dotenv, tldextract
+    src/app/                     website pages and components (Checker, ResultCard, HowItWorks, ApiSection)
+  ml/train_domain_model.py       trains the hostname model and exports it to JSON
+  supabase/schema.sql            api_keys and analytics tables
+  tests/                         pytest suite, runs offline (76 tests)
+
+
+======================================================================
+3. TECHNOLOGY AND WHY
+======================================================================
+Website      Next.js 16, React 19, TypeScript, Tailwind CSS 4, Vercel Analytics
+API          FastAPI + Pydantic (Python), served as a Vercel Python function at /api/*
+Data         Supabase Postgres: api_keys, analytics
+URL parsing  tldextract (knows real domain endings like .co.uk, .gov.in)
+External     VirusTotal API v3, Google Safe Browsing, OpenPhish public feed, ip2whois (WHOIS)
+ML training  scikit-learn, pandas, numpy (only on your laptop, NOT in the deployed API)
+
+Why the model is JSON instead of a .pkl file: the API runs the trees in plain Python, so the
+deployment does not need scikit-learn/numpy/pandas (much smaller and faster to start on Vercel)
+and cannot break because of a scikit-learn version mismatch. The training script checks that the
+exported trees give the same probability as scikit-learn (difference below 0.0001 on 500 rows).
+
+
+======================================================================
+4. HOW A LINK IS CHECKED  (detectors/scorer.py analyze())
+======================================================================
+Step 1  Parse the URL (urlparts.py). Invalid URL -> clear 422 error.
+Step 2  Address rules (lexical.py) and the ML model run instantly, offline.
+Step 3  Network checks run in parallel threads with an 8-second total budget:
+        VirusTotal, Safe Browsing, OpenPhish, WHOIS, DNS + redirects.
+        A source that is slow, down or not configured is reported as "timeout", "error" or
+        "not_configured" and NEVER raises the score.
+Step 4  If the link redirects to another site, the destination address is checked by the
+        same rules ("After redirecting to ...").
+        If it redirects to the brand's own official site (paypa1.com -> paypal.com), the brand
+        warnings are reduced to 20% (companies buy look-alikes of their own name).
+Step 5  Well-known domains (google.com, a bank's real domain...) get address rules, model and
+        domain signals multiplied by 0.25, because their own login pages legitimately say "login".
+        Reputation feeds still apply in full.
+Step 6  All signal weights are combined with noisy-OR (below). A confirmed listing in a
+        reputation feed sets the score to at least 0.95.
+Step 7  The score becomes a level, a verdict, advice, and a breakdown per layer.
+
+Noisy-OR (signals.combine):
+    risk = 1 - (1 - w1) x (1 - w2) x ... x (1 - wn)
+  Each signal counts once; two medium signals add up to more than either alone; the score can
+  never pass 1; and many weak signals cannot outweigh one strong signal the way plain addition would.
+
+Risk levels:
+    0.00-0.19 safe      "No signs of phishing found."
+    0.20-0.39 low       minor warning signs
+    0.40-0.59 medium    "Suspicious" - do not enter passwords, cards or OTPs
+    0.60-0.79 high      "Likely phishing"
+    0.80-1.00 critical  "Phishing or malicious. Do not open."
+
+
+======================================================================
+5. THE FOUR LAYERS
+======================================================================
+5.1 Reputation (reputation.py)
+  - VirusTotal: looks up the exact URL; if never scanned, falls back to the domain (not for
+    shorteners, hosting platforms or well-known sites, which get flagged because of their users).
+    3 or more engines say malicious: on the URL -> weight 0.95, confirmed; on the domain -> 0.8.
+    1-2 engines: 0.3 (URL) or 0.2 (domain), treated as a warning. 3+ "suspicious": 0.35.
+  - Google Safe Browsing: a match -> 0.97, confirmed.
+  - OpenPhish feed of active phishing URLs: exact URL -> 0.97, confirmed; same host -> 0.8.
+  - Results are cached (VirusTotal URL 15 min, domain 1 hour, OpenPhish feed 30 min) to save quota.
+
+5.2 Address rules (lexical.py, brands.py) - about 35 rules, for example:
+  brand_in_subdomain     paypal.com.secure-login.xyz
+  brand_in_domain        sbi-netbanking-update.com
+  brand_other_tld        paypal.top
+  lookalike_domain       paypa1, g00gle (Levenshtein / Damerau edit distance to brand names)
+  punycode, mixed_scripts   IDN homoglyphs (Cyrillic "а" instead of Latin "a")
+  userinfo_trick         https://google.com@evil.com
+  ip_host, obfuscated_ip    raw IPs, and disguised ones like 3232235777 or 0xC0A80101
+  free_hosting, url_shortener, shared_content_host   free sites, tunnels, bit.ly and similar
+  suspicious_tld         .tk, .xyz, .top ... (often abused)
+  credential_words_in_host / in_path   login, verify, account, kyc ...
+  risky_download, double_extension     .exe, .apk, invoice.pdf.exe
+  embedded_redirect      open-redirect parameters (?url=https://...)
+  random_domain, digit_heavy_domain, deep_subdomains, many_hyphens, long_url, encoded_url,
+  unusual_port, http_only, compromised_cms_path (e.g. /wp-includes/ phishing kits)
+  The brand list includes global and Indian targets (PayPal, Google, Apple, Microsoft, Amazon,
+  SBI, HDFC, ICICI, Kotak, Paytm, Airtel, India Post, income tax ...).
+
+5.3 Domain records (domain.py, netsafe.py)
+  - WHOIS age: under 30 days -> 0.5 ("most phishing domains are used within weeks"),
+    under 180 days -> 0.2, under a year -> 0.06.
+  - DNS: domain does not resolve, or resolves to a private address.
+  - Redirects followed server-side (up to 5 hops, 4-second timeout); cross-domain redirect; no HTTPS.
+  - SSRF protection: every hop is resolved first; private, loopback, link-local, multicast and
+    cloud-metadata (169.254.169.254) addresses are refused; only http/https on ports 80/443/8080/8443.
+
+5.4 Hostname ML model (features.py, ml_model.py)
+  Looks only at the SHAPE of the hostname with 20 features:
+    lengths (host, domain, longest label, TLD), number of subdomains, hyphens, digits,
+    digit ratio, longest digit run, longest consonant run, vowel ratio, Shannon entropy of the
+    domain and host, unique-character ratio, common TLD, abused TLD, IP address, punycode,
+    letters mixed with digits in one label.
+  Brand names and credential words are deliberately NOT model features, because the rules already
+  score them; using them twice would double-count the same evidence.
+  Only confident predictions count: probability >= 0.6 -> signal weight min(0.45, probability - 0.5).
+  Well-known domains are never penalised by the model.
+
+
+======================================================================
+6. THE MODEL: TRAINING AND RESULTS  (ml/train_domain_model.py)
+======================================================================
+Dataset: PhiUSIIL Phishing URL Dataset (UCI Machine Learning Repository, id 967)
+  Prasad, A. & Chandra, S. (2023), Computers & Security. Label 0 = phishing, 1 = legitimate.
+
+Problems found in the dataset and how they were handled (good interview points):
+  - Every legitimate URL is a bare homepage (https://www.domain), while phishing URLs often
+    have paths. A model using the full URL would learn "has a path = phishing".
+    -> The model sees ONLY the hostname.
+  - Legitimate hosts have no subdomains except www. -> 35% of legitimate rows get a common
+    subdomain added (docs., mail., app., login., ...) so the model does not learn
+    "any subdomain = phishing".
+  - The same phishing host appears many times. -> one row per (host, label).
+  - Train and test are split BY registrable domain (GroupShuffleSplit, 80/20, random_state 42),
+    so the test set never contains a domain seen in training.
+
+Model: GradientBoostingClassifier(n_estimators=250, max_depth=4, learning_rate=0.1,
+       subsample=0.8, min_samples_leaf=40, random_state=42)
+Export: each tree's split features, thresholds and leaf values written to domain_model.json;
+       prediction = sigmoid(init + 0.1 x sum of the 250 tree outputs).
+
+Results on held-out domains (42,884 test rows, stored in domain_model.json):
+  ROC-AUC 0.879   PR-AUC 0.867   (README also reports precision 0.93 at the 0.5 threshold)
+
+Whole-system results from the README (offline: rules + model, without reputation lookups):
+  300 live phishing URLs from the OpenPhish feed (Nov 2026):  81% flagged medium or higher
+  Tranco top 2,000 real sites:                                 0% high/critical, 4.3% medium
+  Tranco sites ranked 50,000-52,000:                           0% high/critical, 2.7% medium
+With reputation lookups on, links already known to the feeds are caught however they look.
+
+
+======================================================================
+7. THE API
+======================================================================
+POST /api/check-url     body {"url": "..."} (max 2,048 characters), optional header X-API-Key
+  Returns: risk_score, risk_level, verdict, recommendation, confirmed_malicious, signals
+  (id, layer, title, detail, weight, severity), threats_detected, ml_score, domain age and
+  creation date, final_url after redirects, brands_detected, status of each check,
+  a score per layer (blacklist, pattern, domain, ml), and analysis time in ms.
+POST /api/auth/signup   email -> a new API key, shown ONCE (an existing key is never returned)
+GET  /api/auth/validate?api_key=...
+GET  /api/analytics     your recent checks (header X-API-Key)
+GET  /api/health        status, model loaded, which sources are configured
+GET  /api/docs          interactive FastAPI docs
+
+Limits:
+  Guests:        10 checks per minute and 100 per day per IP (IP stored only as a SHA-256 hash)
+  With API key:  100 checks per day (resets at 00:00 UTC)
+  All limits can be changed with environment variables.
+
+
+======================================================================
+8. DATABASE  (supabase/schema.sql)
+======================================================================
+api_keys   email (unique), api_key (unique), requests count, created_at
+analytics  api_key, url, risk_score, is_safe, created_at  (index on api_key + time)
+Row-level security is ON with no policies: the public anon key can read or write nothing.
+Only the server, using the service-role key, can access the tables.
+
+
+======================================================================
+9. SECURITY DECISIONS
+======================================================================
+  - All provider keys (VirusTotal, Safe Browsing, WHOIS, Supabase service key) stay on the server.
+  - SSRF protection on every outbound request (see 5.3).
+  - API keys shown once; guest IPs hashed; input length limited; errors return safe messages.
+  - CORS allows any origin without credentials, which suits a public API.
+  - A failing external source can never crash a scan or raise the score.
+
+
+======================================================================
+10. TESTING
+======================================================================
+  76 pytest tests, all passing, no network or database needed (PHISHGUARD_OFFLINE mode):
+  detection rules, scoring, levels, API routes and errors.
+  Run: .venv/bin/python -m pytest tests
+
+
+======================================================================
+11. HONEST LIMITS
+======================================================================
+  - The guest rate limit is kept in memory per serverless instance (best effort).
+  - Free VirusTotal tier allows 4 requests per minute; when exceeded it is reported as
+    "rate_limited" and the other layers still work.
+  - On the live site (checked 21 Nov 2026) Google Safe Browsing is not configured; VirusTotal,
+    WHOIS, OpenPhish and API keys are.
+  - The model judges hostname shape only; page content is not downloaded or analysed.
+
+
+======================================================================
+12. HOW TO RUN
+======================================================================
+  python -m venv .venv && .venv/bin/pip install -r frontend/api/requirements.txt uvicorn pytest
+  cd frontend && ../.venv/bin/uvicorn api.index:app --port 8000      (API)
+  npm install && npm run dev                                          (site on :3000)
+  Environment: VIRUSTOTAL_API_KEY, GOOGLE_SAFE_BROWSING_KEY, WHOIS_API_KEY,
+               SUPABASE_URL, SUPABASE_KEY (service role); all optional.
+  Retrain: .venv/bin/pip install pandas scikit-learn
+           .venv/bin/python ml/train_domain_model.py PhiUSIIL_Phishing_URL_Dataset.csv

@@ -129,7 +129,7 @@ ALL_OFFICIAL = set().union(*BRANDS.values())
 
 # Widely used sites with a long safe history. Matching the registrable domain
 # lowers the influence of lexical heuristics and the ML model; reputation
-# feeds (VirusTotal, Safe Browsing, OpenPhish) still apply.
+# feeds (VirusTotal, OpenPhish) still apply.
 WELL_KNOWN = ALL_OFFICIAL | {
     "wikipedia.org", "wikimedia.org", "reddit.com", "stackoverflow.com", "stackexchange.com",
     "python.org", "mozilla.org", "w3.org", "npmjs.com", "pypi.org", "medium.com", "notion.so",

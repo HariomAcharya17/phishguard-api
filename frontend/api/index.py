@@ -68,7 +68,6 @@ def health():
         "model_loaded": ml_model.MODEL_LOADED,
         "sources": {
             "virustotal": bool(os.getenv("VIRUSTOTAL_API_KEY")),
-            "safe_browsing": bool(os.getenv("GOOGLE_SAFE_BROWSING_KEY")),
             "whois": bool(os.getenv("WHOIS_API_KEY")),
             "openphish": os.getenv("OPENPHISH_DISABLED") != "1",
             "accounts": bool(os.getenv("SUPABASE_URL") and os.getenv("SUPABASE_KEY")),

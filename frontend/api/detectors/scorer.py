@@ -44,7 +44,7 @@ ADVICE = {
 }
 
 LAYER_DESCRIPTIONS = {
-    "reputation": "VirusTotal, Google Safe Browsing and OpenPhish lookups for this link and domain.",
+    "reputation": "VirusTotal and OpenPhish lookups for this link and domain.",
     "url": "Rules for brand impersonation, look-alike domains, hosting platforms and obfuscation tricks.",
     "domain": "Registration age, DNS, HTTPS and where the link redirects.",
     "ml": "Gradient-boosted tree model scoring the hostname's structure, trained on the PhiUSIIL dataset.",
@@ -86,7 +86,6 @@ def analyze(raw_url: str, network: bool | None = None) -> dict:
                 _safe_call, reputation.virustotal, p,
                 not (well_known or facts.get("shortener") or facts.get("hosting_platform")),
             ),
-            "safe_browsing": _pool.submit(_safe_call, reputation.safe_browsing, p),
             "openphish": _pool.submit(_safe_call, reputation.openphish, p),
             "whois": _pool.submit(_safe_call, domain.domain_age, p),
             "dns": _pool.submit(_safe_call, domain.dns_and_redirects, p),
@@ -98,9 +97,9 @@ def analyze(raw_url: str, network: bool | None = None) -> dict:
                 continue
             sigs, info = fut.result()
             checks[name] = info
-            (rep_signals if name in ("virustotal", "safe_browsing", "openphish") else dom_signals).extend(sigs)
+            (rep_signals if name in ("virustotal", "openphish") else dom_signals).extend(sigs)
     else:
-        for name in ("virustotal", "safe_browsing", "openphish", "whois", "dns"):
+        for name in ("virustotal", "openphish", "whois", "dns"):
             checks[name] = {"status": "skipped"}
 
     # If the link redirects elsewhere (shorteners, tracking links), judge the

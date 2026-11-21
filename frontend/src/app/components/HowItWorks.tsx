@@ -2,7 +2,7 @@ const LAYERS = [
   {
     n: "01",
     title: "Reputation feeds",
-    body: "The link and its domain are looked up in VirusTotal (90+ security vendors), Google Safe Browsing and the OpenPhish feed of active phishing pages. A confirmed listing always produces a Dangerous verdict.",
+    body: "The link and its domain are looked up in VirusTotal (90+ security vendors) and the OpenPhish feed of active phishing pages. A confirmed listing always produces a Dangerous verdict.",
   },
   {
     n: "02",

@@ -72,7 +72,7 @@ export default function Checker() {
             Check a link before you open it
           </h1>
           <p className="mx-auto mt-4 max-w-2xl text-base leading-relaxed text-slate-300 text-pretty sm:text-lg">
-            Paste a link from an email, SMS or chat. PhishGuard checks it against VirusTotal, Google Safe Browsing and
+            Paste a link from an email, SMS or chat. PhishGuard checks it against VirusTotal and
             OpenPhish, inspects the address for impersonation tricks, and looks up how old the domain is.
           </p>
 
@@ -125,7 +125,7 @@ export default function Checker() {
             The link is never opened in your browser. Our server makes one request to see where it leads.
           </p>
           <p className="mt-10 text-xs uppercase tracking-wider text-slate-500">Checked against</p>
-          <p className="mt-2 text-sm text-slate-300">VirusTotal · Google Safe Browsing · OpenPhish · WHOIS records</p>
+          <p className="mt-2 text-sm text-slate-300">VirusTotal · OpenPhish · WHOIS records</p>
         </div>
       </section>
 

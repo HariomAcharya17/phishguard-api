@@ -36,7 +36,7 @@ phishguard-api/
       urlparts.py                parses and normalises the URL (host, registrable domain, subdomain, IP, punycode)
       lexical.py                 address rules (brand impersonation, look-alikes, tricks)
       brands.py                  brand list: what attackers type -> the brand's official domains
-      reputation.py              VirusTotal, Google Safe Browsing, OpenPhish (with caching)
+      reputation.py              VirusTotal and OpenPhish (with caching)
       domain.py                  WHOIS age, DNS, HTTPS, redirects
       netsafe.py                 safe outbound requests (SSRF protection)
       features.py                20 hostname features for the ML model
@@ -58,7 +58,7 @@ Website      Next.js 16, React 19, TypeScript, Tailwind CSS 4, Vercel Analytics
 API          FastAPI + Pydantic (Python), served as a Vercel Python function at /api/*
 Data         Supabase Postgres: api_keys, analytics
 URL parsing  tldextract (knows real domain endings like .co.uk, .gov.in)
-External     VirusTotal API v3, Google Safe Browsing, OpenPhish public feed, ip2whois (WHOIS)
+External     VirusTotal API v3, OpenPhish public feed, ip2whois (WHOIS)
 ML training  scikit-learn, pandas, numpy (only on your laptop, NOT in the deployed API)
 
 Why the model is JSON instead of a .pkl file: the API runs the trees in plain Python, so the
@@ -73,7 +73,7 @@ exported trees give the same probability as scikit-learn (difference below 0.000
 Step 1  Parse the URL (urlparts.py). Invalid URL -> clear 422 error.
 Step 2  Address rules (lexical.py) and the ML model run instantly, offline.
 Step 3  Network checks run in parallel threads with an 8-second total budget:
-        VirusTotal, Safe Browsing, OpenPhish, WHOIS, DNS + redirects.
+        VirusTotal, OpenPhish, WHOIS, DNS + redirects.
         A source that is slow, down or not configured is reported as "timeout", "error" or
         "not_configured" and NEVER raises the score.
 Step 4  If the link redirects to another site, the destination address is checked by the
@@ -108,7 +108,6 @@ Risk levels:
     shorteners, hosting platforms or well-known sites, which get flagged because of their users).
     3 or more engines say malicious: on the URL -> weight 0.95, confirmed; on the domain -> 0.8.
     1-2 engines: 0.3 (URL) or 0.2 (domain), treated as a warning. 3+ "suspicious": 0.35.
-  - Google Safe Browsing: a match -> 0.97, confirmed.
   - OpenPhish feed of active phishing URLs: exact URL -> 0.97, confirmed; same host -> 0.8.
   - Results are cached (VirusTotal URL 15 min, domain 1 hour, OpenPhish feed 30 min) to save quota.
 
@@ -214,7 +213,7 @@ Only the server, using the service-role key, can access the tables.
 ======================================================================
 9. SECURITY DECISIONS
 ======================================================================
-  - All provider keys (VirusTotal, Safe Browsing, WHOIS, Supabase service key) stay on the server.
+  - All provider keys (VirusTotal, WHOIS, Supabase service key) stay on the server.
   - SSRF protection on every outbound request (see 5.3).
   - API keys shown once; guest IPs hashed; input length limited; errors return safe messages.
   - CORS allows any origin without credentials, which suits a public API.
@@ -235,8 +234,6 @@ Only the server, using the service-role key, can access the tables.
   - The guest rate limit is kept in memory per serverless instance (best effort).
   - Free VirusTotal tier allows 4 requests per minute; when exceeded it is reported as
     "rate_limited" and the other layers still work.
-  - On the live site (checked 21 Nov 2026) Google Safe Browsing is not configured; VirusTotal,
-    WHOIS, OpenPhish and API keys are.
   - The model judges hostname shape only; page content is not downloaded or analysed.
 
 
@@ -246,7 +243,7 @@ Only the server, using the service-role key, can access the tables.
   python -m venv .venv && .venv/bin/pip install -r frontend/api/requirements.txt uvicorn pytest
   cd frontend && ../.venv/bin/uvicorn api.index:app --port 8000      (API)
   npm install && npm run dev                                          (site on :3000)
-  Environment: VIRUSTOTAL_API_KEY, GOOGLE_SAFE_BROWSING_KEY, WHOIS_API_KEY,
+  Environment: VIRUSTOTAL_API_KEY, WHOIS_API_KEY,
                SUPABASE_URL, SUPABASE_KEY (service role); all optional.
   Retrain: .venv/bin/pip install pandas scikit-learn
            .venv/bin/python ml/train_domain_model.py PhiUSIIL_Phishing_URL_Dataset.csv

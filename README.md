@@ -8,7 +8,7 @@ Built by [Hariom Acharya](https://github.com/HariomAcharya17). Live at **[your-p
 
 | Layer | What it does |
 |---|---|
-| Reputation | VirusTotal (URL, then domain as a fallback), Google Safe Browsing, and the OpenPhish feed of active phishing URLs. A confirmed listing sets the score to at least 0.95. |
+| Reputation | VirusTotal (URL, then domain as a fallback) and the OpenPhish feed of active phishing URLs. A confirmed listing sets the score to at least 0.95. |
 | Address rules | Brand names on unrelated domains or hidden in subdomains, look-alike spellings (`paypa1`, `g00gle`), IDN homoglyphs and mixed alphabets, text before `@`, raw or disguised IPs (`3232235777`, `0xC0A80101`), free hosting and tunnels, shorteners, risky downloads, open-redirect parameters, credential wording. |
 | Domain records | WHOIS registration age, DNS resolution, HTTPS on the final page, and the real destination after redirects (followed server-side with SSRF protection). |
 | Hostname model | Gradient-boosted trees over 20 hostname features, trained on the PhiUSIIL dataset. Stored as JSON and scored in pure Python. |
@@ -66,7 +66,6 @@ Other endpoints: `POST /api/auth/signup` (email → key, shown once), `GET /api/
 | Name | Required | Purpose |
 |---|---|---|
 | `VIRUSTOTAL_API_KEY` | recommended | VirusTotal lookups (free tier: 4 requests/min) |
-| `GOOGLE_SAFE_BROWSING_KEY` | recommended | Safe Browsing lookups (free) |
 | `WHOIS_API_KEY` | recommended | Domain age via ip2whois |
 | `SUPABASE_URL`, `SUPABASE_KEY` | for API keys | Supabase project URL and **service-role** key |
 | `OPENPHISH_DISABLED` | no | Set to `1` to skip the OpenPhish feed |
@@ -99,7 +98,7 @@ Dataset: Prasad, A. & Chandra, S. (2023). *PhiUSIIL: A diverse security profile 
 
 ## Security notes
 
-- Provider keys (VirusTotal, Safe Browsing, WHOIS, Supabase) are read only by the server and never sent to the browser.
+- Provider keys (VirusTotal, WHOIS, Supabase) are read only by the server and never sent to the browser.
 - An existing API key is never returned on signup; it is shown once when created.
 - Links are fetched server-side only to follow redirects. Every hop is resolved and private, loopback and cloud-metadata addresses are refused.
 - CORS allows any origin without credentials, which suits a public API.

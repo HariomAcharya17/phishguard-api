@@ -124,7 +124,7 @@ def test_lookalike_redirecting_to_official_site_is_damped(monkeypatch):
     from detectors import domain, reputation
     monkeypatch.setattr(domain, "dns_and_redirects", lambda p: ([], {"resolves": True, "final_url": "https://www.paypal.com/in/home"}))
     monkeypatch.setattr(domain, "domain_age", lambda p: ([], {"status": "ok"}))
-    for name in ("virustotal", "safe_browsing", "openphish"):
+    for name in ("virustotal", "openphish"):
         monkeypatch.setattr(reputation, name, lambda p, *a: ([], {"status": "ok"}))
     r = scorer.analyze("http://paypa1.com/", network=True)
     ids = {s["id"]: s for s in r["signals"]}

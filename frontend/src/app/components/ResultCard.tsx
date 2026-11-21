@@ -35,14 +35,6 @@ function sourceRows(r: CheckResult): Row[] {
     rows.push({ name: "VirusTotal", value: mal ? `${mal} of ${eng} engines flag it${scope}` : `Clean, 0 of ${eng} engines${scope}`, tone: mal >= 3 ? "bad" : mal ? "warn" : "good" });
   }
 
-  const gsb = r.checks.safe_browsing;
-  const gsbSkip = statusText(gsb);
-  rows.push(gsbSkip
-    ? { name: "Google Safe Browsing", value: gsbSkip, tone: "muted" }
-    : (gsb?.matches as string[] | undefined)?.length
-      ? { name: "Google Safe Browsing", value: "Listed as dangerous", tone: "bad" }
-      : { name: "Google Safe Browsing", value: "Not listed", tone: "good" });
-
   const op = r.checks.openphish;
   const opSkip = statusText(op);
   rows.push(opSkip

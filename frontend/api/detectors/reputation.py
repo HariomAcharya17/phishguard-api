@@ -1,5 +1,5 @@
 """
-Reputation feeds: VirusTotal, Google Safe Browsing and OpenPhish.
+Reputation feeds: VirusTotal and OpenPhish.
 
 Each source is optional. A missing key or an outage is reported as
 "not checked" and never raises the risk score on its own.
@@ -81,38 +81,6 @@ def virustotal(p: ParsedURL, domain_fallback: bool = True) -> tuple[list[Signal]
         sigs.append(Signal("vt_suspicious", "reputation", "Marked suspicious by security vendors",
                            f"{sus} VirusTotal engines mark {what} as suspicious.", 0.35))
     return sigs, info
-
-
-# ── Google Safe Browsing ────────────────────────────────────────────
-
-def safe_browsing(p: ParsedURL) -> tuple[list[Signal], dict]:
-    key = os.getenv("GOOGLE_SAFE_BROWSING_KEY")
-    if not key:
-        return [], {"status": "not_configured"}
-
-    def call():
-        body = {
-            "client": {"clientId": "phishguard", "clientVersion": "2.0"},
-            "threatInfo": {
-                "threatTypes": ["MALWARE", "SOCIAL_ENGINEERING", "UNWANTED_SOFTWARE", "POTENTIALLY_HARMFUL_APPLICATION"],
-                "platformTypes": ["ANY_PLATFORM"],
-                "threatEntryTypes": ["URL"],
-                "threatEntries": [{"url": p.url}],
-            },
-        }
-        r = requests.post(f"https://safebrowsing.googleapis.com/v4/threatMatches:find?key={key}", json=body, timeout=5)
-        r.raise_for_status()
-        return [m.get("threatType") for m in r.json().get("matches", [])]
-
-    try:
-        matches = _cached(f"gsb:{p.url}", 900, call)
-    except requests.RequestException:
-        return [], {"status": "error"}
-    if not matches:
-        return [], {"status": "ok", "matches": []}
-    kinds = ", ".join(sorted({m.replace("_", " ").lower() for m in matches}))
-    return [Signal("safe_browsing_match", "reputation", "Listed by Google Safe Browsing",
-                   f"Google Safe Browsing lists this link as {kinds}.", 0.97, confirmed=True)], {"status": "ok", "matches": matches}
 
 
 # ── OpenPhish community feed ────────────────────────────────────────

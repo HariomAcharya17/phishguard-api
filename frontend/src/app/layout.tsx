@@ -9,7 +9,7 @@ const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"]
 export const metadata: Metadata = {
   title: "PhishGuard — Check a link for phishing",
   description:
-    "Paste a link to see if it's phishing. PhishGuard checks VirusTotal, Google Safe Browsing and OpenPhish, inspects the address for impersonation tricks and looks up the domain's age.",
+    "Paste a link to see if it's phishing. PhishGuard checks VirusTotal and OpenPhish, inspects the address for impersonation tricks and looks up the domain's age.",
   icons: { icon: "/icon.svg" },
 };
 

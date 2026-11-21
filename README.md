@@ -2,7 +2,7 @@
 
 Phishing link checker and API. Paste a URL and get a verdict, a 0–100 risk score and a plain-language list of everything that was found.
 
-Built by [Hariom Acharya](https://github.com/HariomAcharya17). Live at **[phishguard-api.vercel.app](https://phishguard-api.vercel.app)**.
+Built by [Hariom Acharya](https://github.com/HariomAcharya17). Live at **[your-phish-guard.vercel.app](https://your-phish-guard.vercel.app)**.
 
 ## How a link is checked
 
